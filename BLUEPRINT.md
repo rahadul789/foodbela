@@ -1,6 +1,7 @@
 # FoodBela — Master Blueprint
 
 ## Overview
+
 FoodBela is a food delivery platform for Bangladesh, similar to FoodPanda.
 Architecture: **Monolithic** | Language: **JavaScript only** | Payment: **bKash**
 
@@ -8,26 +9,28 @@ Architecture: **Monolithic** | Language: **JavaScript only** | Payment: **bKash*
 
 ## 5 Applications
 
-| App | Type | Framework | Actors |
-|-----|------|-----------|--------|
-| `customer-app` | Mobile | React Native Expo | Customer |
-| `rider-app` | Mobile | React Native Expo | Deliveryman |
+| App              | Type   | Framework         | Actors           |
+| ---------------- | ------ | ----------------- | ---------------- |
+| `customer-app`   | Mobile | React Native Expo | Customer         |
+| `rider-app`      | Mobile | React Native Expo | Deliveryman      |
 | `restaurant-app` | Mobile | React Native Expo | Restaurant Owner |
-| `restaurant-web` | Web | Next.js | Restaurant Owner |
-| `admin-web` | Web | Next.js | Super Admin |
+| `restaurant-web` | Web    | React.js          | Restaurant Owner |
+| `admin-web`      | Web    | React.js          | Super Admin      |
 
 ---
 
 ## Tech Stack
 
 ### Frontend (All Apps)
+
 - React Native Expo (file-based routing via expo-router)
-- Next.js 15 (App Router, file-based routing)
+- React.js v19
 - TanStack Query (server state, caching — NO Redis)
 - Zustand (client/global state)
 - JavaScript only (NO TypeScript)
 
 ### Backend
+
 - Node.js + Express.js
 - MongoDB + Mongoose
 - Socket.IO (live location, real-time orders)
@@ -36,6 +39,7 @@ Architecture: **Monolithic** | Language: **JavaScript only** | Payment: **bKash*
 - bcrypt (password hashing)
 
 ### Payment
+
 - bKash Payment Gateway (tokenized checkout)
 
 ---
@@ -52,6 +56,7 @@ Architecture: **Monolithic** | Language: **JavaScript only** | Payment: **bKash*
 ---
 
 ## Key Rules
+
 - No TypeScript — convert all existing `.tsx/.ts` files to `.jsx/.js`
 - No Redis — use TanStack Query for caching
 - Auth: Basic email + password (JWT), upgradeable to Google later

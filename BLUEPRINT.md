@@ -69,6 +69,7 @@ Architecture: **Monolithic** | Language: **JavaScript only** | Payment: **bKash*
 8. [Docker & Kubernetes](./docs/08_docker_kubernetes.md)
 9. [Staging & CI/CD](./docs/09_staging_cicd.md)
 10. [Expo FCM Implementation Guide](./docs/11_expo_fcm_implementation_guide.md)
+11. [Bela Cat Mascot](./docs/12_bela_cat_mascot.md)
 
 ---
 
@@ -100,3 +101,20 @@ Architecture: **Monolithic** | Language: **JavaScript only** | Payment: **bKash*
 | 5 | **Export Data** | Streaming CSV exports for orders, payouts, riders, customers, restaurants with date range filters |
 | 6 | **System Settings** | Singleton config: commission rate, delivery fee, min order, maintenance mode, support contacts |
 | 7 | **Admin Activity Log** | Immutable audit trail logging every admin action with before/after diffs, filterable by admin/action/date |
+
+---
+
+## Bela (বেলা) — Cat Mascot
+
+A cute, interactive Bengal cat that lives in the customer-app as a floating companion.
+
+- **13 moods** — happy, excited, hungry, sleepy, curious, celebrating, sad, angry, proud, love, thinking, waving, pointing
+- **Screen-aware** — auto-reacts based on current route (home, cart, checkout, tracking, etc.)
+- **Touch-responsive** — tap (random reaction), double-tap (food joke), long-press (purr), swipe (minimize), shake (easter egg)
+- **Bangla dialogues** — all messages in Bangla, emotionally connects with local users
+- **Socket-aware** — reacts to order events (confirmed, preparing, delivered, cancelled)
+- **Onboarding guide** — walks first-time users through the app in 4 steps
+- **Achievement celebrations** — 1st order, 5th, 10th, 25th, 50th, first 5-star, streaks
+- **Fully modular** — all code in `customer-app/modules/bela/`, zero coupling. Remove `BelaProvider` = app unchanged.
+- **Lottie animations** — ~20 animation files, ~1.5MB total, lazy loaded
+- See [full spec](./docs/12_bela_cat_mascot.md) for dialogues, moods, architecture

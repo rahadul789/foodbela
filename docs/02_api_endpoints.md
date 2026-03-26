@@ -50,8 +50,8 @@ Roles: `customer` | `rider` | `restaurant_owner` | `admin`
 | GET | `/auth/me` | — | Any auth | Get current user profile |
 | PUT | `/auth/change-password` | `{ currentPassword, newPassword }` | Any auth | Change password |
 | PUT | `/auth/profile` | `{ name, phone, profileImage }` | Any auth | Update own profile |
-| GET | `/auth/notification-preferences` | — | Any auth | Get notification preferences (`{ orderUpdates, promotions, riderUpdates }` — all default true) |
-| PUT | `/auth/notification-preferences` | `{ orderUpdates?, promotions?, riderUpdates? }` | Any auth | Update notification preferences. Server checks these before sending push notifications — if `promotions=false`, skip promo pushes |
+| GET | `/auth/notification-preferences` | — | Any auth | Get notification preferences (`{ orderUpdates, promotions, newRestaurants, sound, vibration }` — all default true) |
+| PUT | `/auth/notification-preferences` | `{ orderUpdates?, promotions?, newRestaurants?, sound?, vibration? }` | Any auth | Update notification preferences. Server checks these before sending push notifications — if `promotions=false`, skip promo pushes |
 | POST | `/auth/forgot-password` | `{ email }` | Public | Generate reset token → send email with reset link. Rate limited: 3 req/hour |
 | POST | `/auth/reset-password` | `{ token, newPassword }` | Public | Validate token (15min expiry) → update password → clear token fields |
 
@@ -275,7 +275,7 @@ Roles: `customer` | `rider` | `restaurant_owner` | `admin`
 | PUT | `/cuisine-types/:id` | (partial update) | admin | Update cuisine type (name, icon, isActive, sortOrder) |
 | DELETE | `/cuisine-types/:id` | — | admin | Delete cuisine type (only if no restaurants use it) |
 
-> **Restaurant ↔ CuisineType:** `Restaurant.cuisineType` stores the slug string (not ObjectId) — keeps restaurant docs portable. Admin manages the master list here.
+> **Restaurant ↔ CuisineType:** `Restaurant.cuisineTypes` stores an array of slug strings (not ObjectIds) — e.g. `['bengali','chinese']`. Keeps restaurant docs portable. Admin manages the master list here.
 
 ---
 
@@ -321,7 +321,8 @@ Roles: `customer` | `rider` | `restaurant_owner` | `admin`
 | PUT | `/reviews/:id/reject` | `{ reason }` | admin | Reject review — hidden from public, reason stored for audit |
 | DELETE | `/reviews/:id` | — | admin | Permanently delete review (only for spam/abuse) |
 | GET | `/restaurants/:id/reviews` | `?page&limit` | Public | Get approved reviews for a restaurant (customer-facing) |
-| POST | `/orders/:id/review` | `{ rating, comment?, foodRating?, deliveryRating? }` | customer | Submit review after order delivered (only once per order) |
+
+> **Customer submits review via `POST /orders/:id/rate`** (defined in Order Routes above) — creates Review document with `status: 'pending'`. No separate POST endpoint here.
 
 ```js
 // Review Schema additions (add to Review model in schema doc):

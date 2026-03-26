@@ -295,43 +295,241 @@ If the user opens the app but doesn't interact for a while, Bela tries to engage
 
 ## Animation System
 
-Use **Lottie** (`lottie-react-native`) for all Bela animations.
+**Fully coded character** — SVG drawn in code (`react-native-svg`) + animated with `react-native-reanimated`.
 
-### Animation Files Needed
+### Why Code-Drawn (not Lottie/PNG)
+- **Zero assets** — no designer, no Lottie files, no PNGs. The cat IS the code.
+- **Full control** — every pixel is a prop. Sad? Change the eye bezier curve. Happy? Curve the mouth up.
+- **Tiny bundle** — 0KB extra assets. Just JSX + SVG paths.
+- **Animatable parts** — each body part is a separate SVG element with its own Reanimated shared values
+- **Moods via props** — mood changes = different SVG path values, not different files
+
+### Cat Anatomy — SVG Parts
+
+Bela is built from ~15 SVG parts, each independently animatable:
+
 ```
-assets/bela/
-├── happy.json           # Default happy state (looping)
-├── excited.json         # Jumping with sparkles (looping)
-├── hungry.json          # Rubbing belly, drooling (looping)
-├── sleepy.json          # Yawning, zzz (looping)
-├── curious.json         # Head tilt, big eyes (looping)
-├── celebrating.json     # Party hat, confetti (play once → loop idle)
-├── sad.json             # Droopy ears (looping)
-├── angry.json           # Puffed up, tail big (looping)
-├── proud.json           # Crown, chest puff (play once → loop idle)
-├── love.json            # Heart eyes (play once → loop idle)
-├── thinking.json        # Paw on chin (looping)
-├── waving.json          # Paw wave (play once → loop happy)
-├── pointing.json        # Pointing paw (play once → loop idle)
-├── tap-reaction.json    # Random tap response (play once)
-├── purring.json         # Long press purr (looping while pressed)
-├── sleeping.json        # Idle too long (looping)
-├── dizzy.json           # Shake easter egg (play once)
-├── slide-out.json       # Dismiss animation (play once)
-├── slide-in.json        # Return animation (play once)
-└── onboarding/
-    ├── welcome.json     # Sparkle entrance
-    ├── guide-scroll.json
-    ├── guide-search.json
-    └── guide-order.json
+┌─────────────────────────────────┐
+│         Bela's SVG Parts        │
+│                                 │
+│    leftEar ╲     ╱ rightEar     │
+│             ╲   ╱               │
+│         ┌───────────┐           │
+│         │  ◉     ◉  │ ← eyes (ellipse, pupil moves)
+│         │     ▽     │ ← nose (small triangle)
+│         │    ───    │ ← mouth (bezier: smile/frown/open)
+│         │   /   \   │ ← whiskers (lines, 3 per side)
+│         └───────────┘           │
+│              │ │                │
+│         ┌────┴─┴────┐          │
+│         │   body    │ ← body (rounded rect/ellipse)
+│         │           │          │
+│         └─┬──┬──┬──┬┘          │
+│           │  │  │  │ ← paws (4 small rounded rects)
+│           └──┘  └──┘           │
+│                    ～ ← tail (bezier curve, wags)
+│                                 │
+│   + accessories (per mood):     │
+│     crown, party hat, hearts,   │
+│     zzz bubbles, tears, steam   │
+└─────────────────────────────────┘
 ```
 
-**Lottie files:** Will be custom-designed. Each file ~30-80KB. Total: ~1.5MB.
+### SVG Part Details
 
-### Animation Transitions
+| Part | SVG Element | Animatable Properties |
+|------|-------------|----------------------|
+| **Head** | `<Ellipse>` | scale, rotation (tilt) |
+| **Left/Right Ear** | `<Path>` (triangle) | rotation (perk up / droop), fill color (pink inside) |
+| **Left/Right Eye** | `<Ellipse>` + `<Circle>` (pupil) | eye height (squint/wide), pupil position (look direction), pupil size |
+| **Eyebrows** | `<Path>` (optional, per mood) | rotation, translateY (raised/furrowed) |
+| **Nose** | `<Path>` (inverted triangle) | tiny bounce on tap |
+| **Mouth** | `<Path>` (cubic bezier) | curve control points change per mood (smile ↑ / frown ↓ / open O / tongue out) |
+| **Whiskers** | `<Line>` × 6 (3 per side) | rotation (twitch on tap) |
+| **Body** | `<Path>` (rounded shape) | scaleY (breathing), scaleX (puff up when angry) |
+| **Front Paws** | `<Ellipse>` × 2 | translateY (wave), rotation (point) |
+| **Back Paws** | `<Ellipse>` × 2 | translateX (stance) |
+| **Tail** | `<Path>` (cubic bezier) | control point animation (wag, curl, droop) |
+| **Blush** | `<Circle>` × 2 (semi-transparent pink) | opacity (visible in love/happy) |
+
+### Fur Color Palette
+
 ```
-mood change → play transition animation → loop new mood animation
-tap → interrupt current → play tap-reaction → resume mood animation
+Body/Head fill:     #F4A460 (warm sandy orange-brown)
+Darker stripes:     #CD853F (tiger stripes on forehead + body, Path overlays)
+Ear inside:         #FFB6C1 (light pink)
+Nose:               #FF69B4 (hot pink, small)
+Eye color:          #2E8B57 (sea green iris) + #000 (pupil)
+Eye white:          #FFFAF0 (floral white)
+Paw pads:           #FFB6C1 (pink, shown in waving pose)
+Belly (lighter):    #FFDEAD (navajo white, subtle)
+Whiskers:           #2F2F2F (dark gray, thin lines)
+Blush:              #FFB6C1 opacity 0.4
+```
+
+### Mood = SVG State Changes
+
+Each mood changes specific SVG properties. NO file swaps — just prop changes with smooth interpolation:
+
+| Mood | Eyes | Mouth | Ears | Tail | Body | Extras |
+|------|------|-------|------|------|------|--------|
+| `happy` | Normal, bright | Smile curve up (↑) | Perked up | Gentle wag (slow) | Normal | Blush visible |
+| `excited` | Wide open, large pupils | Big open smile (O) | Perked high | Fast wag | Bouncing | Sparkle particles above head |
+| `hungry` | Half-lidded, looking at food | Open, tongue out to side | Normal | Slow swish | Slight lean forward | Drool drop from mouth, belly rumble line |
+| `sleepy` | Heavy half-closed (squint) | Small yawn (open oval) | Drooped slightly | Curled around body | Slow breathing (scaleY pulse) | Zzz text floating up (animated opacity + translateY) |
+| `curious` | One big, one slightly smaller | Slight "o" | One up, one tilted | Upright, slight curve | Head tilt (rotate -10deg) | "?" above head |
+| `celebrating` | Sparkle/star eyes | Huge smile, teeth showing | Perked max | Straight up, vibrating | Arms/paws up | Party hat accessory + confetti particles |
+| `sad` | Downturned, teary (drop below eye) | Frown curve down (↓) | Fully drooped | Limp, hanging down | Slight shrink (scale 0.95) | Tear drop animating down cheek |
+| `angry` | Narrowed, sharp angle brows | Zigzag frown, showing teeth | Flat back | Puffed (thick path), rigid | Puffed up (scaleX 1.1) | Steam puffs above head |
+| `proud` | Confident, slightly closed | Smug smile (one side up) | Perked, relaxed | High elegant curve | Chest puffed (scaleY 1.05) | Crown accessory on head |
+| `love` | Heart-shaped (replaced with heart paths) | Dreamy smile | Relaxed, soft | Curled into heart shape | Normal, slight float | Hearts floating up around body |
+| `thinking` | Looking up-left, one squinting | Flat line, slight hmm | One up, one neutral | Still, slight curl | Paw on chin (front paw raised) | "..." thought dots above head |
+| `waving` | Happy normal | Smile | Perked | Gentle wag | Normal | One front paw raised, waving back-and-forth |
+| `pointing` | Looking in point direction | Smile | Perked, alert | Straight | Leaning toward point direction | One front paw extended outward |
+
+### Continuous Animations (Reanimated loops)
+
+These run constantly regardless of mood — they make Bela feel alive:
+
+| Animation | Implementation | Shared Values |
+|-----------|---------------|---------------|
+| **Breathing** | Body scaleY oscillates 1.0 → 1.02 → 1.0 | `withRepeat(withSequence(withTiming(1.02, 2000), withTiming(1.0, 2000)), -1)` |
+| **Blinking** | Eyes squash to line every 3-5s (random interval) | Eye height: full → 0.1 → full in 150ms. Random `setTimeout` re-triggers. |
+| **Tail idle** | Tail bezier control point sways | `withRepeat(withSequence(withSpring(10), withSpring(-10)), -1, true)` |
+| **Ear twitch** | Tiny random rotation on one ear | Random ear, ±3deg, every 5-8s |
+| **Floating** | Entire cat floats up/down | `translateY: withRepeat(withSequence(withSpring(-4), withSpring(0)), -1, true)` |
+
+### Mood Transition
+```
+Mood changes from A → B:
+1. Quick scale down (1.0 → 0.85) — 120ms withTiming
+2. Interpolate all SVG props from mood A values → mood B values — 200ms
+3. Scale back up (0.85 → 1.0) — 250ms withSpring (bouncy)
+4. Start mood B's specific animations
+```
+
+### Tap Reaction
+```
+User taps Bela:
+1. Squish: scaleX → 1.15, scaleY → 0.85 — 80ms
+2. Spring back: scaleX → 1.0, scaleY → 1.0 — 200ms spring
+3. Jump: translateY → -25px — 150ms
+4. Land with overshoot: translateY → 0 — 300ms spring (damping: 6)
+5. Whiskers twitch: rotate ±8deg rapidly 3 times
+6. Eyes widen briefly: eye scale 1.0 → 1.2 → 1.0
+7. Resume current mood animation
+```
+
+### Accessories (Rendered Conditionally per Mood)
+
+Drawn as extra SVG elements, layered on top of base cat:
+
+| Accessory | When Shown | SVG |
+|-----------|------------|-----|
+| **Crown** | `proud` mood | Small golden `<Path>` with 3 points, positioned above head |
+| **Party hat** | `celebrating` mood | Triangular `<Path>` with striped fill, on head |
+| **Hearts** | `love` mood | 3 small `<Path>` hearts floating up with `withRepeat` translateY + opacity fade |
+| **Tear drops** | `sad` mood | Small `<Ellipse>` below each eye, animated translateY downward + fade |
+| **Steam puffs** | `angry` mood | 2 small `<Circle>` groups above head, animated scale pulse |
+| **Zzz** | `sleepy`/`sleeping` | "Z" `<Text>` elements floating up diagonally, staggered opacity |
+| **Sparkles** | `excited` mood | Small star `<Path>` elements around head, animated rotate + opacity |
+| **"?"** | `curious` mood | `<Text>` element above head, gentle bounce |
+| **"..."** | `thinking` mood | 3 dots appearing sequentially (staggered opacity) |
+| **Tongue** | `hungry` mood | Small pink `<Path>` sticking out side of mouth |
+| **Drool drop** | `hungry` mood | `<Ellipse>` below mouth, animated translateY down + detach |
+| **Confetti** | `celebrating` mood | Multiple small colored `<Rect>` elements, random positions, falling + rotating |
+
+### Example: Simplified Component Structure
+```jsx
+// modules/bela/components/BelaCharacter.jsx
+import Svg, { Ellipse, Path, Circle, Line, Text, G } from 'react-native-svg'
+import Animated, { useAnimatedProps } from 'react-native-reanimated'
+
+const AnimatedEllipse = Animated.createAnimatedComponent(Ellipse)
+const AnimatedPath = Animated.createAnimatedComponent(Path)
+// ... other animated SVG components
+
+export default function BelaCharacter({ mood, size = 80 }) {
+  // Shared values for each body part
+  const bodyScaleY = useSharedValue(1)
+  const eyeHeight = useSharedValue(12)
+  const mouthPath = useSharedValue(MOUTH_PATHS.smile)
+  const tailControl = useSharedValue(0)
+  const leftEarRotate = useSharedValue(0)
+  const rightEarRotate = useSharedValue(0)
+  // ... more shared values
+
+  // Start continuous animations (breathing, blinking, idle tail)
+  useContinuousAnimations({ bodyScaleY, eyeHeight, tailControl, leftEarRotate })
+
+  // Apply mood-specific overrides
+  useMoodAnimation(mood, { eyeHeight, mouthPath, tailControl, ... })
+
+  return (
+    <Svg width={size} height={size * 1.3} viewBox="0 0 100 130">
+      {/* Tail (behind body) */}
+      <AnimatedPath ... />
+
+      {/* Body */}
+      <AnimatedEllipse cx={50} cy={80} rx={30} ry={25} fill="#F4A460" ... />
+
+      {/* Head */}
+      <G>
+        {/* Ears */}
+        <AnimatedPath d="..." fill="#F4A460" />  {/* left ear */}
+        <AnimatedPath d="..." fill="#F4A460" />  {/* right ear */}
+        <AnimatedPath d="..." fill="#FFB6C1" />  {/* left ear inside */}
+        <AnimatedPath d="..." fill="#FFB6C1" />  {/* right ear inside */}
+
+        {/* Head shape */}
+        <Ellipse cx={50} cy={40} rx={28} ry={24} fill="#F4A460" />
+
+        {/* Tiger stripes on forehead */}
+        <Path d="..." stroke="#CD853F" strokeWidth={1.5} />
+
+        {/* Eyes */}
+        <AnimatedEllipse cx={38} cy={38} rx={6} fill="#FFFAF0" />   {/* left white */}
+        <AnimatedEllipse cx={62} cy={38} rx={6} fill="#FFFAF0" />   {/* right white */}
+        <AnimatedCircle cx={38} cy={38} r={3} fill="#2E8B57" />     {/* left iris */}
+        <AnimatedCircle cx={62} cy={38} r={3} fill="#2E8B57" />     {/* right iris */}
+        <AnimatedCircle cx={38} cy={37} r={1.5} fill="#000" />      {/* left pupil */}
+        <AnimatedCircle cx={62} cy={37} r={1.5} fill="#000" />      {/* right pupil */}
+
+        {/* Nose */}
+        <Path d="M48,46 L50,49 L52,46 Z" fill="#FF69B4" />
+
+        {/* Mouth (bezier — changes per mood) */}
+        <AnimatedPath stroke="#333" strokeWidth={1.5} fill="none" />
+
+        {/* Whiskers */}
+        <Line x1={20} y1={44} x2={35} y2={42} stroke="#2F2F2F" />  {/* left whiskers */}
+        <Line x1={65} y1={42} x2={80} y2={44} stroke="#2F2F2F" />  {/* right whiskers */}
+        {/* ... 4 more whisker lines */}
+
+        {/* Blush (conditional) */}
+        <Circle cx={30} cy={48} r={5} fill="#FFB6C1" opacity={0.4} />
+        <Circle cx={70} cy={48} r={5} fill="#FFB6C1" opacity={0.4} />
+      </G>
+
+      {/* Front paws */}
+      <AnimatedEllipse cx={35} cy={102} rx={8} ry={5} fill="#F4A460" />
+      <AnimatedEllipse cx={65} cy={102} rx={8} ry={5} fill="#F4A460" />
+
+      {/* Mood-specific accessories */}
+      {mood === 'proud' && <CrownAccessory />}
+      {mood === 'celebrating' && <PartyHat />}
+      {mood === 'love' && <FloatingHearts />}
+      {mood === 'sad' && <TearDrops />}
+      {mood === 'angry' && <SteamPuffs />}
+      {mood === 'sleepy' && <ZzzBubbles />}
+      {mood === 'excited' && <Sparkles />}
+      {mood === 'curious' && <QuestionMark />}
+      {mood === 'thinking' && <ThinkingDots />}
+      {mood === 'hungry' && <DroolDrop />}
+      {mood === 'celebrating' && <ConfettiParticles />}
+    </Svg>
+  )
+}
 ```
 
 ---
@@ -370,7 +568,7 @@ customer-app/
         ├── index.js                    # Module exports
         ├── components/
         │   ├── BelaOverlay.jsx         # Main floating overlay (wraps everything)
-        │   ├── BelaCharacter.jsx       # Lottie animation renderer
+        │   ├── BelaCharacter.jsx       # SVG cat rendered in code (react-native-svg + reanimated)
         │   ├── BelaBubble.jsx          # Speech bubble component
         │   ├── BelaMinimized.jsx       # Small paw icon (when dismissed)
         │   └── BelaOnboarding.jsx      # Full-screen onboarding flow
@@ -386,12 +584,14 @@ customer-app/
         │   ├── dialogues.js            # All dialogue strings organized by screen + mood
         │   ├── moods.js                # Mood definitions, priorities, transitions
         │   ├── achievements.js         # Achievement definitions + thresholds
-        │   └── animations.js           # Animation file mapping per mood
-        ├── utils/
-        │   ├── belaStorage.js          # AsyncStorage helpers (onboarding, achievements, preferences)
-        │   └── belaScheduler.js        # Message cooldown, frequency cap, queue logic
-        └── assets/
-            └── (Lottie JSON files — see Animation System section)
+        │   └── animations.js           # Reanimated animation configs per mood (shared value targets, durations, springs)
+        ├── svg/
+        │   ├── catParts.js            # SVG path data for all body parts (head, ears, body, tail, paws)
+        │   ├── accessories.js         # SVG components for mood accessories (crown, party hat, hearts, zzz, tears, steam, confetti)
+        │   └── colors.js             # Cat color palette constants
+        └── utils/
+            ├── belaStorage.js          # AsyncStorage helpers (onboarding, achievements, preferences)
+            └── belaScheduler.js        # Message cooldown, frequency cap, queue logic
 ```
 
 ### Integration Point — Single Line
@@ -579,11 +779,13 @@ Stored in `AsyncStorage` under key `belaSettings`.
 
 ## Performance Considerations
 
-- **Lottie files:** Compressed, each 30-80KB. Total bundle ~1.5MB (loaded lazily)
+- **Zero assets:** No images, no Lottie files — SVG is just JSX code, adds ~0KB to bundle
+- **SVG rendering:** react-native-svg is GPU-accelerated, ~15 SVG elements is trivial
+- **Reanimated:** Runs on UI thread — 60fps animations without blocking JS thread
 - **Overlay:** Uses `position: absolute` — does not affect layout or scroll performance
 - **Re-renders:** `BelaContext` is split — mood changes don't re-render children (only the overlay)
 - **Idle timer:** Uses `AppState` listener — no battery drain
-- **Memory:** Only one Lottie animation loaded at a time (swap on mood change)
+- **Animated props:** `useAnimatedProps` updates SVG paths on UI thread — no JS bridge crossing
 - **AsyncStorage reads:** On mount only, cached in state after
 - **Bundle:** The entire `modules/bela/` can be excluded from production build if needed (feature flag)
 
@@ -611,5 +813,5 @@ That's it. Bela does not import any component, API service, or auth store direct
 3. **Bangla-first:** Every dialogue in Bangla — feels local, personal, familiar
 4. **Touch responsiveness:** Makes the app feel alive and playful
 5. **Zero coupling:** Remove `BelaProvider` from layout = Bela gone, app unchanged
-6. **Performance safe:** Lottie + absolute positioning = no layout thrashing
+6. **Performance safe:** SVG + Reanimated on UI thread + absolute positioning = no layout thrashing
 7. **Unique differentiator:** No food delivery app in Bangladesh has this

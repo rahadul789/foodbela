@@ -173,7 +173,6 @@ jobs:
       run: |
         cd admin-web && npm ci && npm run build
         cd ../restaurant-web && npm ci && npm run build
-        cd ../customer-web && npm ci && npm run build
 ```
 
 ### Workflow 2: Deploy to Staging

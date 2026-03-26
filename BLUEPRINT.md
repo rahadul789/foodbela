@@ -71,6 +71,8 @@ Architecture: **Monolithic** | Language: **JavaScript only** | Payment: **bKash*
 10. [Expo FCM Implementation Guide](./docs/11_expo_fcm_implementation_guide.md)
 11. [Bela Cat Mascot](./docs/12_bela_cat_mascot.md)
 
+> Note: File numbering skips `10_` — docs 10-11 map to files `11_` and `12_`.
+
 ---
 
 ## Key Rules
@@ -116,5 +118,5 @@ A cute, interactive Bengal cat that lives in the customer-app as a floating comp
 - **Onboarding guide** — walks first-time users through the app in 4 steps
 - **Achievement celebrations** — 1st order, 5th, 10th, 25th, 50th, first 5-star, streaks
 - **Fully modular** — all code in `customer-app/modules/bela/`, zero coupling. Remove `BelaProvider` = app unchanged.
-- **Lottie animations** — ~20 animation files, ~1.5MB total, lazy loaded
+- **Code-drawn SVG** — entire cat drawn in code (`react-native-svg`), animated with `react-native-reanimated`. Zero asset files, 0KB extra bundle.
 - See [full spec](./docs/12_bela_cat_mascot.md) for dialogues, moods, architecture

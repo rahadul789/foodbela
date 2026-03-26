@@ -682,6 +682,121 @@ App opens → Location permission prompt
 
 ---
 
+## Milestone 14 — Bela Cat Mascot (customer-app)
+
+**Goal:** Interactive cat mascot that guides users, reacts to actions, and emotionally connects with customers. Fully modular — all code in `modules/bela/`.
+
+> See `docs/12_bela_cat_mascot.md` for full spec: moods, dialogues, touch interactions, animations, architecture.
+
+### Tasks
+
+**Setup & Core:**
+
+- [ ] Create `modules/bela/` folder structure inside `customer-app/`
+- [ ] Install `lottie-react-native` in customer-app
+- [ ] Create `BelaProvider` context — manages mood, message queue, visibility, minimized state
+- [ ] Create `useBela` hook — returns `triggerMood()`, `showMessage()`, graceful no-op if outside provider
+- [ ] Wrap `app/_layout.jsx` with `BelaProvider` (single integration line)
+- [ ] Create `BelaOverlay` — floating absolute-positioned container (bottom-right), renders character + bubble
+- [ ] Create `BelaCharacter` — Lottie animation renderer, swaps animation file based on current mood
+- [ ] Create `BelaBubble` — speech bubble component with auto-dismiss (4s default), queue system, cooldown (same message within 5min blocked), frequency cap (max 1 auto-bubble per 30s, taps bypass)
+
+**Mood Engine (Passive — works without any screen using useBela):**
+
+- [ ] `useBelaMood` hook inside BelaProvider — resolves current mood from priority: screen override > user action > time-based > context > default happy
+- [ ] `useBelaScreen` hook — watches `usePathname()`, auto-triggers screen-specific dialogues from `data/dialogues.js`
+- [ ] Time-based moods: morning greeting (6-11am), lunch prompt (12-2pm), evening (6-9pm), sleepy (12am-5am)
+- [ ] Idle detection: 15s → wave, 30s → food suggestion, 60s → dramatic, 2min → falls asleep
+- [ ] Socket listener in BelaProvider: listens to `order_confirmed`, `order_preparing`, `order_ready`, `order_picked_up`, `rider_nearby`, `order_delivered`, `order_cancelled` → triggers matching mood + dialogue
+
+**Touch Interactions:**
+
+- [ ] `useBelaTouch` hook — gesture handlers using React Native Gesture Handler or Pressable
+- [ ] Single tap → random reaction (jump/meow/spin) + random Bangla response from pool
+- [ ] Double tap → food tip or joke bubble
+- [ ] Long press (1s+) → purring animation + optional haptic vibration
+- [ ] Swipe right → Bela slides off screen → shows small paw icon at edge (minimized)
+- [ ] Tap paw icon → Bela bounces back
+- [ ] Shake device → easter egg: Bela gets dizzy (use `expo-sensors` Accelerometer)
+
+**Dialogues & Data:**
+
+- [ ] `data/dialogues.js` — all dialogue strings organized by screen + mood + context (all in Bangla)
+- [ ] `data/moods.js` — 13 mood definitions with priority levels and animation mappings
+- [ ] `data/achievements.js` — achievement definitions (1st order, 5th, 10th, 25th, 50th, first 5-star, first referral, first voucher, 3-day streak)
+- [ ] `data/animations.js` — maps mood → Lottie file path
+
+**Onboarding (First-Time User):**
+
+- [ ] `BelaOnboarding` component — 4-step full-screen walkthrough (Welcome → Home guide → Search guide → Order flow guide)
+- [ ] Store `hasCompletedOnboarding` in AsyncStorage — show only once
+- [ ] After onboarding: Bela settles into floating position with intro message
+
+**Achievements:**
+
+- [ ] `useBelaAchievements` hook — tracks milestones in AsyncStorage (`belaAchievements` key)
+- [ ] Triggers: first order, 5th/10th/25th/50th order, first 5-star review, first referral, first voucher, 3-day ordering streak
+- [ ] Each achievement triggers special animation + unique Bangla celebration message
+- [ ] Client-side only — no server/API calls needed
+
+**Smart Behavior:**
+
+- [ ] Auto-minimize during: bKash WebView, live tracking map full screen, any modal/bottom sheet
+- [ ] If dismissed (swiped), stays minimized for session, returns on next app open
+- [ ] `BelaMinimized` component — small paw icon that bounces when tapped
+
+**User Settings:**
+
+- [ ] Add to Profile > Settings screen: "Show Bela" toggle (default: on), "Bela Sound" toggle (default: off), "Bela Bubbles" toggle (default: on)
+- [ ] Store in AsyncStorage under `belaSettings` key
+- [ ] Respect settings in BelaProvider — if disabled, render nothing
+
+**Animation Assets:**
+
+- [ ] Create/source 20 Lottie animation JSON files (happy, excited, hungry, sleepy, curious, celebrating, sad, angry, proud, love, thinking, waving, pointing, tap-reaction, purring, sleeping, dizzy, slide-out, slide-in + 4 onboarding)
+- [ ] Place in `modules/bela/assets/`
+- [ ] Total target: ~1.5MB for all animations
+- [ ] Lazy load — only one animation active at a time
+
+**Performance:**
+
+- [ ] `BelaContext` split so mood changes only re-render overlay, not screen children
+- [ ] Lottie: one animation at a time (swap on mood change, unmount previous)
+- [ ] Absolute positioning — zero layout impact on scroll/content
+- [ ] AsyncStorage reads on mount only, cached in state
+
+### Packages to Install (customer-app)
+
+```bash
+npx expo install lottie-react-native
+npx expo install expo-sensors    # For shake detection easter egg
+npx expo install expo-haptics    # For purr vibration on long press
+```
+
+### Test
+
+- Fresh install → Bela onboarding appears → complete 4 steps → Bela settles bottom-right
+- Home screen → Bela says greeting based on time of day
+- Idle 30s → Bela suggests food
+- Idle 2min → Bela falls asleep → tap → wakes up
+- Add items to cart → Bela happy → empty cart → Bela sad
+- Checkout screen → Bela guides through steps
+- Apply voucher → Bela celebrates discount
+- Place order → Bela celebrates
+- Order confirmed via socket → Bela reacts "Restaurant confirm করেছে!"
+- Order delivered via socket → Bela party animation
+- Order cancelled → Bela sad
+- Tap Bela → random Bangla response
+- Double tap → food joke/tip
+- Long press → purring + haptic
+- Swipe right → Bela minimizes → tap paw → returns
+- Shake phone → dizzy easter egg
+- First order complete → achievement celebration
+- Profile > Settings > disable Bela → cat disappears entirely → enable → returns
+- Remove `BelaProvider` from layout → app works perfectly, `useBela()` returns no-ops
+
+---
+
 ## Dependency Summary
 
 ### Server
@@ -728,8 +843,18 @@ App opens → Location permission prompt
   "socket.io-client": "latest",
   "expo-location": "latest",
   "react-native-webview": "latest",
-  "expo-notifications": "latest"
+  "expo-notifications": "latest",
+  "lottie-react-native": "latest",
+  "expo-sensors": "latest",
+  "expo-haptics": "latest"
 }
+```
+
+### customer-app Only (Bela Mascot)
+
+```
+lottie-react-native, expo-sensors, expo-haptics are only needed in customer-app.
+rider-app and restaurant-app do NOT need these packages.
 ```
 
 ---

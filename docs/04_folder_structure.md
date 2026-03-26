@@ -174,6 +174,56 @@ customer-app/
 │   ├── useAuth.js
 │   ├── useCart.js
 │   └── useSocket.js
+├── modules/
+│   └── bela/                          # 🐱 Cat mascot — fully modular, zero coupling
+│       ├── index.js                   # Module exports (BelaProvider, useBela)
+│       ├── components/
+│       │   ├── BelaOverlay.jsx        # Floating overlay container (renders character + bubble)
+│       │   ├── BelaCharacter.jsx      # Lottie animation renderer (swaps by mood)
+│       │   ├── BelaBubble.jsx         # Speech bubble with auto-dismiss + queue
+│       │   ├── BelaMinimized.jsx      # Small paw icon when dismissed
+│       │   └── BelaOnboarding.jsx     # First-time 4-step walkthrough
+│       ├── context/
+│       │   └── BelaProvider.jsx       # Global state: mood, visibility, message queue, socket listener
+│       ├── hooks/
+│       │   ├── useBela.js             # Main hook — triggerMood(), showMessage(), no-op fallback
+│       │   ├── useBelaTouch.js        # Tap, double tap, long press, swipe, shake gestures
+│       │   ├── useBelaMood.js         # Mood engine — priority resolution (screen > action > time > default)
+│       │   ├── useBelaScreen.js       # Route-aware — auto-triggers dialogues per screen
+│       │   └── useBelaAchievements.js # Client-side milestone tracker (AsyncStorage)
+│       ├── data/
+│       │   ├── dialogues.js           # All Bangla dialogues by screen + mood + context
+│       │   ├── moods.js               # 13 mood definitions + priorities + transitions
+│       │   ├── achievements.js        # Achievement thresholds + celebration messages
+│       │   └── animations.js          # Mood → Lottie file mapping
+│       ├── utils/
+│       │   ├── belaStorage.js         # AsyncStorage helpers (onboarding, achievements, settings)
+│       │   └── belaScheduler.js       # Message cooldown, frequency cap, queue logic
+│       └── assets/                    # ~20 Lottie JSON files (~1.5MB total)
+│           ├── happy.json
+│           ├── excited.json
+│           ├── hungry.json
+│           ├── sleepy.json
+│           ├── curious.json
+│           ├── celebrating.json
+│           ├── sad.json
+│           ├── angry.json
+│           ├── proud.json
+│           ├── love.json
+│           ├── thinking.json
+│           ├── waving.json
+│           ├── pointing.json
+│           ├── tap-reaction.json
+│           ├── purring.json
+│           ├── sleeping.json
+│           ├── dizzy.json
+│           ├── slide-out.json
+│           ├── slide-in.json
+│           └── onboarding/
+│               ├── welcome.json
+│               ├── guide-scroll.json
+│               ├── guide-search.json
+│               └── guide-order.json
 ├── constants/
 │   └── colors.js
 ├── babel.config.js

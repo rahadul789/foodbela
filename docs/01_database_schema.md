@@ -84,7 +84,7 @@ All collections use Mongoose. Timestamps (`createdAt`, `updatedAt`) are enabled 
 // Collection: restaurants
 {
   _id: ObjectId,
-  ownerId: ObjectId,                 // ref: User (restaurant_owner)
+  ownerId: ObjectId,                 // ref: User (restaurant_owner) — unique index (one restaurant per owner enforced at app layer)
   name: String,                      // required
   description: String,
   logo: String,                      // URL
@@ -220,6 +220,7 @@ All collections use Mongoose. Timestamps (`createdAt`, `updatedAt`) are enabled 
                                      // e.g. "ORD-20260311-000001", "ORD-20260311-000002"
                                      // NNNNNN = daily counter, resets each new day
                                      // Generated via atomic Counter model ($inc) — see Model 14
+                                     // Counter _id format: "order_YYYYMMDD" (e.g., "order_20260319")
                                      // Race-condition-safe: concurrent requests never get duplicate numbers
 
   customerId: ObjectId,              // ref: User
@@ -275,13 +276,6 @@ All collections use Mongoose. Timestamps (`createdAt`, `updatedAt`) are enabled 
   bkashPaymentID: String,            // from bKash create API
   bkashTrxID: String,                // from bKash execute API (original transaction ID)
 
-  // Refund fields (bKash only — COD has no refund)
-  bkashRefundTrxID: String,          // from bKash refund API response (refundTrxID)
-  refundedAmount: Number,            // amount refunded in BDT
-  refundReason: String,              // e.g. 'order_cancelled', 'admin_manual'
-  refundStatus: String,              // enum: ['none','completed','failed'], default: 'none'
-  // If refundStatus='failed': order is still cancelled, admin notified to process refund manually
-
   riderAssignmentDeadline: Date,     // set when status becomes 'ready' (Date.now + 60s)
                                      // cron job checks every 30s: if status='ready' && riderId=null && deadline passed
                                      //   → re-broadcast to all online riders + alert admin
@@ -321,7 +315,8 @@ All collections use Mongoose. Timestamps (`createdAt`, `updatedAt`) are enabled 
   // Customer cancel rule:
   //   - status = 'payment_pending': always cancellable (payment not yet confirmed)
   //   - status = 'pending': cancellable — BUT if paymentMethod='bkash' && paymentStatus='paid',
-  //     server auto-triggers bKash refund before cancelling
+  //     refundStatus set to 'processing', refundInitiatedAt = now, refundProcessingUntil = now+2h
+  //     Admin manually processes refund within 2-hour SLA (NOT automatic)
   //   - status = 'confirmed' or later: customer CANNOT cancel — restaurant or admin only
 
   deliveryAddress: {
@@ -360,25 +355,21 @@ All collections use Mongoose. Timestamps (`createdAt`, `updatedAt`) are enabled 
   nearbyAlertSent: Boolean,          // default: false — true once rider_nearby event fired (prevents repeat)
   nearbyAlertSentAt: Date,           // exact timestamp when nearby alert was sent (for deduplication)
 
-  // Cron job deduplication (for rider assignment timeout)
-  riderAssignmentDeadline: Date,     // when to re-broadcast if no rider accepts (now + 30s initially)
-  lastProcessedAt: Date,             // last time cron checked this order (prevents duplicate alerts)
-
-  // Refund handling (NEW - Manual refund with 2-hour SLA)
-  // When order cancelled after payment: refundStatus='processing', admin manually completes within 2h
+  // Refund handling — Manual, admin processes within 2-hour SLA (bKash orders only — COD has no refund)
   refundStatus: String,              // enum: ['none','processing','completed','failed'], default: 'none'
-  refundAmount: Number,              // amount to refund (e.g., 880 after removing discount)
-  refundReason: String,              // why refund (e.g., "User requested cancellation")
-  refundInitiatedAt: Date,           // when cancel was clicked
-  refundProcessingUntil: Date,       // SLA deadline: now + 2 hours — admin must process by this time
-  refundCompletedAt: Date,           // when admin actually processed refund
-  refundFailureReason: String,       // if bKash refund fails, note the error
-  refundInitiatedBy: ObjectId,       // ref: User (admin who initiated refund)
+  refundAmount: Number,              // amount to refund in BDT
+  refundReason: String,              // e.g. 'order_cancelled', 'wrong_items', 'quality_complaint'
+  refundInitiatedAt: Date,           // when cancel was clicked / refund triggered
+  refundProcessingUntil: Date,       // SLA deadline: refundInitiatedAt + 2 hours
+  refundCompletedAt: Date,           // when admin successfully processed refund
+  refundFailureReason: String,       // bKash API error message if refund fails
+  refundProcessedBy: ObjectId,       // ref: User (admin who processed the refund via bKash API — NOT set on customer cancel, only on admin refund action)
+  bkashRefundTrxID: String,          // from bKash refund API response — saved on successful refund
 
   // Ratings (filled after delivery — denormalized from Review model for quick access)
   // When customer submits rating: BOTH Order fields AND Review document are written simultaneously
   foodRating: Number,                // 1-5
-  riderRating: Number,               // 1-5
+  deliveryRating: Number,            // 1-5
   review: String,                    // copy of Review.comment
   isRated: Boolean,                  // default: false — true once Review document is created
 
@@ -500,12 +491,20 @@ All collections use Mongoose. Timestamps (`createdAt`, `updatedAt`) are enabled 
   riderId: ObjectId,                 // ref: User
 
   foodRating: Number,                // 1-5, required
-  riderRating: Number,               // 1-5, optional
+  deliveryRating: Number,            // 1-5, optional (rate rider's delivery)
   comment: String,
+
+  // Moderation (admin review queue)
+  status: String,                    // enum: ['pending', 'approved', 'rejected'], default: 'pending'
+  rejectedReason: String,            // reason for rejection (set by admin)
+  moderatedBy: ObjectId,             // ref: User (admin who moderated)
+  moderatedAt: Date,                 // when moderation happened
 
   createdAt: Date,
   updatedAt: Date
 }
+// Note: Only 'approved' reviews are visible on restaurant public page.
+// Customer submits → status='pending' → admin approves/rejects from moderation queue.
 ```
 
 ---
@@ -571,10 +570,6 @@ All collections use Mongoose. Timestamps (`createdAt`, `updatedAt`) are enabled 
   currentLat: Number,
   currentLng: Number,
   lastUpdated: Date,
-
-  // Alerts
-  nearbyAlertSent: Boolean,          // default: false
-  nearbyAlertSentAt: Date,           // timestamp when alert was sent
 
   createdAt: Date,
   updatedAt: Date
@@ -648,31 +643,6 @@ All collections use Mongoose. Timestamps (`createdAt`, `updatedAt`) are enabled 
 ```
 
 ---
-
-## 14. Counter
-
-```js
-// Collection: counters
-// Atomic counter for order number generation (race-condition-safe)
-{
-  _id: String,              // format: "orderNumber_YYYY-MM-DD" (e.g., "orderNumber_2026-03-19")
-  seq: Number,              // sequence number (incremented daily): 1, 2, 3, ...
-  date: String,             // YYYY-MM-DD for reference
-  updatedAt: Date
-}
-
-// Usage (in order creation endpoint):
-//   1. Get current date in Bangladesh timezone (e.g., "2026-03-19")
-//   2. Find or create counter: { _id: `orderNumber_${date}` }
-//   3. Atomic increment: findOneAndUpdate({ _id }, { $inc: { seq: 1 } }, { upsert: true })
-//   4. Format order number: `ORD-${date}-${String(seq).padStart(6, '0')}`
-//   5. Result: "ORD-20260319-000001", "ORD-20260319-000002", etc.
-
-// Race condition protection:
-//   $inc operation is atomic at MongoDB level.
-//   Two concurrent requests will get seq=1 and seq=2 (different numbers), not duplicate 1.
-//   Works correctly across all Kubernetes pods.
-```
 
 ### How payoutStatus flows
 
@@ -748,6 +718,91 @@ COD order delivered:
 
 ---
 
+## Model 15 — CuisineType
+
+```js
+const cuisineTypeSchema = new mongoose.Schema({
+  name:     { type: String, required: true, unique: true, trim: true }, // e.g. "Bengali", "Chinese"
+  slug:     { type: String, required: true, unique: true, lowercase: true }, // e.g. "bengali", "chinese"
+  icon:     { type: String },  // Cloudinary image URL (emoji or custom icon)
+  isActive: { type: Boolean, default: true },
+  sortOrder: { type: Number, default: 0 }   // display order on home screen filter
+}, { timestamps: true })
+```
+
+---
+
+## Model 16 — SystemSettings
+
+> Singleton document (only one record, _id fixed as "global").
+
+```js
+const systemSettingsSchema = new mongoose.Schema({
+  _id:                  { type: String, default: 'global' },
+  appName:              { type: String, default: 'FoodBela' },
+  commissionRate:       { type: Number, default: 10 },   // % platform commission on every order
+  defaultDeliveryFee:   { type: Number, default: 50 },   // BDT — used if restaurant has no custom fee
+  minOrderAmount:       { type: Number, default: 100 },  // BDT — minimum order value platform-wide
+  maxDeliveryRadius:    { type: Number, default: 10 },   // km — rider search radius
+  maintenanceMode:      { type: Boolean, default: false }, // if true → all apps show maintenance screen
+  maintenanceMessage:   { type: String, default: '' },
+  refundSlaHours:       { type: Number, default: 2 },    // hours to process refund (SLA)
+  riderAssignmentTimeout: { type: Number, default: 60 }, // seconds before unassigned_order_alert
+  supportPhone:         { type: String, default: '' },
+  supportEmail:         { type: String, default: '' },
+  socialLinks: {
+    facebook:  { type: String, default: '' },
+    instagram: { type: String, default: '' }
+  },
+  updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }
+}, { timestamps: true })
+// Usage: const settings = await SystemSettings.findById('global')
+// Create on first boot: SystemSettings.findOneAndUpdate({ _id: 'global' }, {}, { upsert: true, new: true })
+```
+
+---
+
+## Model 17 — AdminActivityLog
+
+> Immutable audit trail — logs every significant admin action.
+
+```js
+const adminActivityLogSchema = new mongoose.Schema({
+  adminId:    { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  action:     { type: String, required: true },  // e.g. "approve_rider", "force_cancel_order", "update_settings"
+  targetType: { type: String },  // "User", "Order", "Restaurant", "Voucher", etc.
+  targetId:   { type: mongoose.Schema.Types.ObjectId },
+  details:    { type: mongoose.Schema.Types.Mixed }, // before/after values or extra context
+  ip:         { type: String },
+  userAgent:  { type: String }
+}, { timestamps: true })
+// No update needed — logs are append-only (never edit or delete)
+```
+
+---
+
+## Model 18 — BroadcastNotification
+
+> Admin sends mass push + in-app notification to a segment of users.
+
+```js
+const broadcastNotificationSchema = new mongoose.Schema({
+  title:       { type: String, required: true },
+  body:        { type: String, required: true },
+  imageUrl:    { type: String },                  // optional image in push notification
+  targetRole:  { type: String, enum: ['all', 'customer', 'rider', 'restaurant_owner'], default: 'all' },
+  targetIds:   [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }], // empty = entire targetRole segment
+  data:        { type: mongoose.Schema.Types.Mixed }, // deep link data: { screen, restaurantId? }
+  sentBy:      { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true }, // admin who sent it
+  sentAt:      { type: Date, default: Date.now },
+  recipientCount: { type: Number, default: 0 },   // total users targeted
+  deliveredCount: { type: Number, default: 0 },   // FCM delivered count (updated async)
+  status:      { type: String, enum: ['pending', 'sending', 'completed', 'failed'], default: 'pending' }
+}, { timestamps: true })
+```
+
+---
+
 ## Relationships Summary
 
 ```
@@ -767,6 +822,11 @@ Order                 → 1 DeliveryTracking
 Order                 → 1 Review
 Voucher               → many VoucherUsages
 Payout                → many Orders (covers multiple orders per payout)
+CuisineType           → many Restaurants (via slug matching)
+SystemSettings        → singleton (only _id='global')
+AdminActivityLog      → 1 User (adminId — who performed the action)
+BroadcastNotification → 1 User (sentBy — admin who sent it)
+BroadcastNotification → many Users (targetIds — optional specific targets)
 ```
 
 ---
@@ -782,7 +842,7 @@ users.currentLocation      → 2dsphere index (find riders near a restaurant)
 
 // Restaurant
 restaurants.location  → 2dsphere index (geo queries)
-restaurants.ownerId   → index
+restaurants.ownerId   → unique index (one restaurant per owner)
 restaurants.isApproved, isActive, isOpen → compound index
 
 // MenuItem
@@ -790,12 +850,16 @@ menuitems.restaurantId, categoryId → compound index
 menuitems.name, description         → text index (dish name search)
 
 // Order
-orders.customerId     → index
-orders.restaurantId   → index
-orders.riderId        → index
-orders.status         → index
-orders.orderNumber    → unique index
-orders.createdAt      → index  (used to count today's orders for orderNumber daily counter)
+orders.customerId               → index
+orders.restaurantId             → index
+orders.riderId                  → index
+orders.status                   → index
+orders.orderNumber              → unique index
+orders.createdAt                → index  (used to count today's orders for orderNumber daily counter)
+orders.{ restaurantId, status } → compound index  (GET /orders/restaurant/:id?status queries)
+orders.{ riderId, status }      → compound index  (GET /orders/rider/queue — assigned orders for rider)
+orders.refundStatus             → index  (GET /refunds/pending — admin refund dashboard)
+orders.riderAssignmentDeadline  → index  (cron job: find overdue unassigned orders efficiently)
 
 // Voucher
 vouchers.code         → unique index
@@ -811,4 +875,24 @@ notifications.userId, isRead → compound index
 
 // DeliveryTracking
 deliverytrackings.orderId → unique index
+
+// Review
+reviews.orderId            → unique index  (one review per order)
+reviews.restaurantId       → index
+reviews.status             → index  (admin moderation queue — filter pending/approved/rejected)
+reviews.{ restaurantId, status } → compound index  (public approved reviews for a restaurant)
+
+// CuisineType
+cuisinetypes.slug       → unique index
+cuisinetypes.isActive   → index
+
+// AdminActivityLog
+adminactivitylogs.adminId    → index
+adminactivitylogs.targetType, targetId → compound index
+adminactivitylogs.createdAt  → index  (time-range queries for audit log)
+
+// BroadcastNotification
+broadcastnotifications.sentBy    → index
+broadcastnotifications.sentAt    → index
+broadcastnotifications.targetRole → index
 ```

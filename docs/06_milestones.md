@@ -12,12 +12,13 @@ Test each milestone before starting the next one.
 ### Tasks
 
 - [ ] Set up `server/` with Express, MongoDB, Socket.IO
-- [ ] Create all 14 Mongoose models (from database schema doc — includes Counter model)
+- [ ] Create all 18 Mongoose models (from database schema doc — includes Counter, CuisineType, SystemSettings, AdminActivityLog, BroadcastNotification)
 - [ ] JWT auth middleware (`auth.middleware.js`)
 - [ ] Role middleware (`role.middleware.js`)
 - [ ] Global error handler (`error.middleware.js`)
 - [ ] Rate limiter middleware (`rateLimiter.middleware.js`) — apply to all routes: 100 req/15min general; auth routes stricter: 10 req/15min
 - [ ] Input validation middleware (`validate.middleware.js`) — wraps `express-validator` check arrays, returns 400 with `errors[]` on failure
+- [ ] Admin activity logger middleware (`adminActivity.middleware.js`) — wraps admin controllers, logs action/targetType/targetId/ip to AdminActivityLog
 - [ ] Standard response helpers (`utils/response.js`)
 - [ ] Order number auto-generation helper (`utils/orderNumber.js`) — uses atomic Counter model (`$inc`) to generate `ORD-YYYYMMDD-NNNNNN` — race-condition-safe
 - [ ] Environment variables setup (`.env` + `.env.example`):
@@ -43,12 +44,16 @@ Test each milestone before starting the next one.
   CLIENT_URL=http://localhost:5173
   ```
 - [ ] Register + Login endpoints (`/api/v1/auth/register`, `/api/v1/auth/login`, `/api/v1/auth/me`) — with `express-validator` input checks
+- [ ] On register (role=rider or restaurant_owner): emit `new_registration_alert` to `admin` room + push notification to admin → admin sees pending approval badge on dashboard
+- [ ] On `PUT /users/:id/approve-rider`: emit `rider_approved` to `user:{riderId}` room + push notification to rider ("আপনার account approve হয়েছে!" or "Rejected: reason")
+- [ ] On `PUT /restaurants/:id/approve`: emit `restaurant_approved` to `user:{ownerId}` room + push notification to restaurant owner
+- [ ] `isOpen=false` policy enforced in backend: toggle-open only blocks NEW orders — do NOT cancel existing active orders
 - [ ] Forgot password endpoint (`POST /api/v1/auth/forgot-password`) → generate crypto token → hash → save to `user.passwordResetToken` + `user.passwordResetExpiry` (15min) → send plain token via email (nodemailer)
 - [ ] Reset password endpoint (`POST /api/v1/auth/reset-password`) → hash incoming token → find user where token matches + expiry > now → update password → clear token fields
 - [ ] `GET /health` endpoint (outside `/api/v1/`) → returns DB connection status — for Kubernetes liveness + readiness probes
 - [ ] Rider assignment cron job (`jobs/riderAssignment.job.js`) — runs every 30s via `node-cron`:
   - Query: `{ status: 'ready', riderId: null, riderAssignmentDeadline: { $lt: Date.now() } }`
-  - Re-broadcast `new_order_available` to `riders_online` room
+  - Re-broadcast: query online riders `{ role:'rider', isOnline:true, isApproved:true }` → emit `new_order_available` to each `user:{riderId}` room individually (NOT `riders_online` room broadcast — riders_online is for server-side tracking only)
   - If deadline passed by 60s+ → emit `unassigned_order_alert` to admin room
   - **Kubernetes-safe**: DB-based check, works across all pods (replaces old in-memory `pendingOrderTimeouts` Map)
 - [ ] Proper logging: Winston (structured logs to file) + Morgan (HTTP request logs)
@@ -57,7 +62,7 @@ Test each milestone before starting the next one.
   - See `docs/07_email_fcm_setup.md` Part 2 for Firebase setup + service account key
 - [ ] Nodemailer setup for email service (password reset, order confirmations)
   - See `docs/07_email_fcm_setup.md` Part 1 for Nodemailer configuration
-- [ ] Convert all web/mobile apps from TypeScript → JavaScript (rename files, remove TS config)
+- [ ] All new files across all apps → write in `.js` or `.jsx` only (existing `.ts`/`.tsx` files stay unchanged)
 - [ ] Mount all routes under `/api/v1/` prefix in `app.js`
 
 ### Packages to Install (Server)
@@ -120,10 +125,10 @@ npm install -D nodemon
 
 ### Tasks
 
-- [ ] Convert restaurant-web from TS → JS
+- [ ] New files → write in `.js`/`.jsx` (existing files stay as-is)
 - [ ] Install: `@tanstack/react-query`, `zustand`, `axios`
 - [ ] `authStore.js` with Zustand (token, user, login/logout)
-- [ ] API service with Axios interceptors
+- [ ] API service with Axios interceptors — **401 response → auto logout → redirect to /login** (JWT expired or invalid)
 - [ ] Login page
 - [ ] Register page
 - [ ] Dashboard layout (sidebar)
@@ -161,16 +166,17 @@ App opens → Location permission prompt
 
 ### Tasks
 
-- [ ] Convert customer-app from TS → JS
+- [ ] New files → write in `.js`/`.jsx` (existing files stay as-is)
 - [ ] Install: `@tanstack/react-query`, `zustand`, `axios`, `socket.io-client`, `expo-location`, `react-native-maps`
 - [ ] `authStore.js`, `cartStore.js`, `locationStore.js`
+- [ ] Axios interceptor: **401 response → authStore.logout() → navigate to Login screen** (handles JWT expiry mid-session)
 - [ ] App open: request location permission → store in `locationStore`
 - [ ] Guest mode: app fully browsable without login
 - [ ] Login + Register screens (shown only when placing order or accessing profile/orders)
 - [ ] Home screen: location bar at top (tap to change) + banner slider + featured restaurants (sorted by `featuredSortOrder` asc) + nearby restaurants list (TanStack Query)
 - [ ] Address picker: map screen opens → fixed pin at center of screen (absolutely positioned, not a map marker) → user drags/pans the map to align pin with their location → `onRegionChangeComplete` fires → reverse geocode center coords via OpenStreetMap Nominatim (free) → show address string below map → "Confirm Location" button saves `{ lat, lng, address }`
 - [ ] Max 3 saved addresses per user (label: Home/Work/Other)
-- [ ] Home screen: cuisine type icons row (Burger, Pizza, Biryani...) → tap filters restaurant list
+- [ ] Home screen: fetch cuisine types from `GET /api/v1/cuisine-types` (TanStack Query, cache 30min) → render as horizontal scrollable icon chips → tap filters restaurant list. **Do NOT hardcode categories** — admin manages the list
 - [ ] Home screen: restaurant filter sheet (rating, delivery time, delivery fee, cuisine, has discounts, **open now toggle**)
 - [ ] Search screen: two tabs — "Restaurants" and "Dishes" (calls `/api/search?q=...`)
 - [ ] Restaurant detail screen: menu by category
@@ -233,21 +239,38 @@ App opens → Location permission prompt
 
 - [ ] Restaurant order list + filter by status
 - [ ] Confirm, preparing, ready, cancel endpoints
+- [ ] `PUT /orders/:id/update-eta` — restaurant owner updates ETA. Allowed only when status = 'confirmed' or 'preparing'. Saves new `estimatedDeliveryTime` → emits `order_eta_updated` socket event to customer → sends push notification: "⏱ Your order will take a bit longer — new ETA: X mins"
+- [ ] One restaurant per owner enforced: `POST /restaurants` → check if owner already has a restaurant → return 400 if yes
 
 **restaurant-app (mobile):**
 
-- [ ] Convert restaurant-app from TS → JS
-- [ ] Install: `@tanstack/react-query`, `zustand`, `axios`, `socket.io-client`
-- [ ] Login screen
-- [ ] Dashboard: online/offline toggle, incoming orders list
-- [ ] Order card with action buttons (Confirm → Preparing → Ready)
-- [ ] Socket: join `restaurant:{id}` room, listen for `new_order`
+- [ ] New files → write in `.js`/`.jsx` (existing files stay as-is)
+- [ ] Install: `@tanstack/react-query`, `zustand`, `axios`, `socket.io-client`, `expo-notifications`
+- [ ] Axios interceptor: **401 response → authStore.logout() → navigate to Login screen**
+- [ ] Login → `GET /restaurants/my` → if `restaurant.isApproved = false` → show "Pending admin approval" screen → listen for `restaurant_approved` socket event → if approved: navigate to dashboard; if rejected: show reason
+- [ ] If `restaurant.isApproved = true` → auto-load dashboard normally
+- [ ] Dashboard: open/closed toggle, incoming orders list
+- [ ] Order card with action buttons (Confirm → Preparing → Ready → Cancel)
+- [ ] On Confirm: show ETA input (minutes) → `PUT /orders/:id/confirm { estimatedDeliveryTime }`
+- [ ] On Preparing: show "Update ETA" button → input new minutes → `PUT /orders/:id/update-eta { estimatedDeliveryTime }`
+- [ ] Socket: join `restaurant:{id}` room on login, listen for `new_order` event
+- [ ] `new_order` arrives → play sound + show in-app alert + add to orders list
+- [ ] FCM push: `new_order` notification → tap → deep link to OrderDetail screen
+- [ ] On notification tap → `addNotificationResponseReceivedListener` → navigate to OrderDetail
+- [ ] Cold start: `getLastNotificationResponseAsync()` → navigate if pending notification
+- [ ] Token refresh: sync `expoPushToken` on launch → POST `/api/v1/auth/push-token`
+- [ ] Permission denied: show soft banner "Enable notifications to get new orders instantly"
 
-**restaurant-web:**
-
-- [ ] Orders page: table of orders, filter by status
-- [ ] Status update buttons inline
-- [ ] Socket listener for new orders (show toast/alert)
+**restaurant-web (backup order management):**
+> restaurant-app = PRIMARY (push notifications + sound alerts). restaurant-web = BACKUP (no push, browser must be open).
+- [ ] Orders page: live list of orders filtered by status tabs (New / Active / Done)
+- [ ] Socket: join `restaurant:{id}` room → `new_order` event → show in-app toast + badge count on Orders tab
+- [ ] Persistent banner on Orders page: "📱 For real-time alerts, use the FoodBela Restaurant App"
+- [ ] Full action buttons: Confirm → Preparing → Ready → Cancel (same API as restaurant-app)
+- [ ] On Confirm: ETA input field (minutes) required before confirming
+- [ ] On Preparing: "Update ETA" button → input new time → `PUT /orders/:id/update-eta`
+- [ ] Order detail modal: items, customer note, delivery address, payment method
+- [ ] Auto-refresh order list on socket events (new order, status change, cancellation, ETA update)
 
 ### Test
 
@@ -275,16 +298,20 @@ App opens → Location permission prompt
 - [ ] DeliveryTracking document created on accept (one per order)
 - [ ] No-rider timeout: when order → `ready`, start in-memory setTimeout: 30s → re-broadcast to all riders; 60s → emit `unassigned_order_alert` to admin room
 - [ ] On order delivered: calculate `riderEarning = deliveryFee`, `commissionAmount = subtotal * commissionRate / 100`, `restaurantPayout = subtotal - commissionAmount` → save to Order, increment `rider.earnings.total` and `rider.earnings.pending`
-- [ ] `POST /api/orders/:id/rate` — save foodRating, riderRating, review to Order fields; create Review document in reviews collection; recalculate `restaurant.rating` avg and increment `restaurant.totalRatings`; set `order.isRated = true`
+- [ ] `POST /api/orders/:id/rate` — save foodRating, deliveryRating, review to Order fields; create Review document in reviews collection; recalculate `restaurant.rating` avg and increment `restaurant.totalRatings`; set `order.isRated = true`
 - [ ] `PUT /orders/:id/assign-rider` (admin) — manually assign or switch rider. Notify old rider (removed from queue), new rider (added to queue), customer (new rider info via `order_reassigned` event) → call `cancelRiderTimeout(orderId)`
 
 **rider-app:**
 
-- [ ] Convert rider-app from TS → JS
+- [ ] New files → write in `.js`/`.jsx` (existing files stay as-is)
 - [ ] Install: `@tanstack/react-query`, `zustand`, `axios`, `socket.io-client`, `expo-location`, `expo-task-manager`
+- [ ] Axios interceptor: **401 response → authStore.logout() → navigate to Login screen**
 - [ ] Login + Register screens
+- [ ] On register success → show "Pending admin approval" screen (rider cannot use app until approved)
+- [ ] Listen for `rider_approved` socket event → if approved: navigate to main app; if rejected: show reason
 - [ ] Available Orders tab: cards with restaurant name, distance, payout (= delivery fee shown upfront) — rider can accept multiple
-- [ ] Accept order button → order added to rider's queue
+- [ ] Accept order button → POST accept API → if **409** (already taken by another rider) → show toast "Order already taken" → remove from available list → navigate back (do NOT crash)
+- [ ] Listen for `order_accepted_by_rider` socket event → if that `orderId` exists in available orders list → **auto-remove it immediately** (prevents other riders from tapping a stale card)
 - [ ] Queue tab (or section): list of all accepted (assigned) orders waiting to be picked up
 - [ ] Active Delivery tab: ONE current delivery (status=picked_up). Action buttons: "Picked Up" (on first order from queue) → "Delivered"
 - [ ] When rider taps "Picked Up" on an order from queue → that order becomes active delivery, others stay in queue
@@ -368,8 +395,15 @@ App opens → Location permission prompt
 - [ ] POST `/api/payments/bkash/execute` → idempotency check: if order.status !== 'payment_pending' return early (prevents double-execute). On success: status→'pending', paymentStatus→'paid', emit new_order to restaurant
 - [ ] POST `/api/payments/bkash/callback` → bKash server-to-server webhook. Only logs/verifies — does NOT call execute (app does that via WebView)
 - [ ] GET `/api/payments/bkash/status/:orderId`
-- [ ] POST `/api/payments/bkash/refund` → accepts `{ orderId, amount, reason }`. On success: save `bkashRefundTrxID`, `refundedAmount`, set `refundStatus='completed'`, `paymentStatus='refunded'`. On failure: set `refundStatus='failed'`, emit `unprocessed_refund_alert` to admin room. Order is cancelled regardless of refund outcome.
-- [ ] Auto-trigger refund in cancel endpoint: if `paymentMethod='bkash'` && `paymentStatus='paid'` → call refund before cancelling
+- [ ] POST `/api/v1/orders/:id/refund` (admin only) → validate `refundStatus='processing'` (400 if not), validate not already refunded (409 if yes) → call bKash refund API → on success: save `bkashRefundTrxID`, set `refundStatus='completed'`, `refundCompletedAt=now`, `paymentStatus='refunded'`, emit `refund_completed` to customer → on failure: set `refundStatus='failed'`, `refundFailureReason`, emit `refund_failed` to customer + `unprocessed_refund_alert` to admin room
+- [ ] Cancel endpoint: if `paymentMethod='bkash'` && `paymentStatus='paid'` → set `refundStatus='processing'`, `refundInitiatedAt=now`, `refundProcessingUntil=now+2h` → emit `refund_processing` to customer → emit `pending_refunds_updated` to admin room (NO automatic bKash API call — admin processes manually)
+
+**admin-web:**
+
+- [ ] GET `/api/v1/refunds/pending` → show table: order number, customer name, amount, time remaining until SLA deadline, "Process Refund" button
+- [ ] GET `/api/v1/refunds/completed` → refund history table
+- [ ] Listen for `pending_refunds_updated` socket event → re-fetch pending count badge in real-time
+- [ ] "Process Refund" button → POST `/api/v1/orders/:id/refund { amount }` → show success/failure toast
 
 **customer-app:**
 
@@ -378,6 +412,10 @@ App opens → Location permission prompt
 - [ ] bKash payment screen: WebView opening paymentURL
 - [ ] Handle redirect callbacks via `onNavigationStateChange`: success → call execute API → navigate to success screen; failure/cancel → navigate back with error
 - [ ] Payment success screen — show order number, "Your order is being prepared"
+- [ ] Order detail screen: if `refundStatus='processing'` → show "Refund processing — will be completed by [refundProcessingUntil]" banner
+- [ ] Listen for `refund_processing` socket event → show "Refund initiated" toast + update UI
+- [ ] Listen for `refund_completed` socket event → show "Refund of ৳X completed! Check your bKash" notification
+- [ ] Listen for `refund_failed` socket event → show "Refund failed. Contact support" notification
 
 ### Test
 
@@ -388,7 +426,8 @@ App opens → Location permission prompt
 - **Verify restaurant receives `new_order` socket event AFTER execute (not before)**
 - Test payment failure → order.status = 'cancelled', customer notified
 - Test cancel during payment (status='payment_pending') → cancelled, no refund
-- Test cancel after payment (status='pending') → auto-refund triggered, verify `bkashRefundTrxID` saved, `refundStatus='completed'`, order cancelled
+- Test cancel after payment (status='pending') → verify `refundStatus='processing'`, customer receives `refund_processing` socket event, admin dashboard shows pending refund
+- Admin manually processes refund → verify `bkashRefundTrxID` saved, `refundStatus='completed'`, customer receives `refund_completed` notification
 - Test admin manual refund → same fields saved
 
 ---
@@ -416,7 +455,7 @@ App opens → Location permission prompt
 
 **admin-web:**
 
-- [ ] Convert admin-web from TS → JS
+- [ ] New files → write in `.js`/`.jsx` (existing files stay as-is)
 - [ ] Install: `@tanstack/react-query`, `zustand`, `axios`
 - [ ] Login page
 - [ ] Dashboard layout (sidebar)
@@ -458,7 +497,10 @@ App opens → Location permission prompt
 
 **admin-web:**
 
+- [ ] Axios interceptor: **401 response → authStore.logout() → redirect to /login**
 - [ ] Dashboard overview: total orders, total revenue (gross), commission earned (FoodBela's cut), active restaurants, active riders (with charts)
+- [ ] **Pending Approvals badge** in sidebar → count of unapproved riders + restaurants
+- [ ] Listen for `new_registration_alert` socket event → increment badge count in real-time → show toast "নতুন rider registration আছে"
 - [ ] Users page: list all users, filter by role, activate/deactivate
 - [ ] Riders page: list, approve/reject pending riders, view each rider's earnings
 - [ ] Restaurants page: list, approve/reject, deactivate, toggle `isFeatured`
@@ -496,6 +538,31 @@ App opens → Location permission prompt
 - [ ] `GET /api/payouts` — list all payouts (admin)
 - [ ] `GET /api/payouts/pending` — summary of all pending payouts (bKash) + pending collections (COD)
 
+**7 Admin Features — Backend:**
+
+- [ ] `cuisineType.routes.js` + `cuisineType.controller.js`: CRUD for cuisine types (admin) + `GET /cuisine-types` (public, active only)
+- [ ] `analytics.routes.js` + `analytics.controller.js`: Overview, orders over time, top restaurants/riders/customers, payment breakdown — all use MongoDB aggregation pipeline with `$match` (date range), `$group`, `$sort`
+- [ ] `review.routes.js` + `review.controller.js`: Submit review (customer, once per delivered order), moderation queue (admin: approve/reject with reason). Add `status`, `rejectedReason`, `moderatedBy`, `moderatedAt` fields to Review model
+- [ ] `broadcast.routes.js` + `broadcast.controller.js`: Create broadcast → resolve recipients by targetRole → bulk create Notification docs → batch send FCM push (500 tokens/request) → update deliveredCount + status
+- [ ] `export.routes.js` + `export.controller.js`: Streaming CSV export for orders, payouts, riders, customers, restaurants. Uses `fast-csv` + Mongoose cursor → pipe to response (no memory bloat)
+- [ ] `settings.routes.js` + `settings.controller.js`: GET + PUT singleton SystemSettings (`_id='global'`). Upsert on first access. Logs changes to AdminActivityLog with before/after diff
+- [ ] `activityLog.routes.js` + `activityLog.controller.js`: Paginated read-only log with filters (adminId, action, targetType, date range)
+- [ ] Seed default CuisineTypes on first boot: Bengali, Chinese, Indian, Thai, Italian, Japanese, Korean, Fast Food, Pizza, Burger, Biryani, Kebab
+- [ ] Seed default SystemSettings (`_id='global'`) on first boot if not exists
+- [ ] Wire `adminActivity.middleware.js` to all admin-mutating routes (approve, reject, cancel, refund, payout, voucher CRUD, banner CRUD, settings update, review moderation, broadcast)
+
+**7 Admin Features — admin-web:**
+
+- [ ] **Analytics page** (`/analytics`): Date range picker (default: last 30 days) → overview cards (orders, revenue, commission, active users) + revenue/orders line chart (recharts) + top restaurants/riders tables + payment method pie chart
+- [ ] **Review Moderation page** (`/reviews`): Table with status tabs (Pending / Approved / Rejected) → click row → expand review (customer, restaurant, rating, comment) → Approve or Reject (with reason modal) → API call → toast success → refresh list
+- [ ] **Notification Broadcast page** (`/notifications`): Composer form (title, body, image upload, target role dropdown, optional specific user multiselect) → preview card → Send button → POST /broadcasts → history table below with sent date, recipients, delivered count, status
+- [ ] **Cuisine Types page** (`/cuisine-types`): Sortable table (drag to reorder sortOrder) → Add button → modal form (name, slug auto-generated from name, icon upload, isActive toggle) → Edit/Delete actions. Delete blocked if restaurants use this type
+- [ ] **System Settings page** (`/settings`): Form with sections: General (appName), Fees (commissionRate, defaultDeliveryFee, minOrderAmount), Delivery (maxDeliveryRadius, riderAssignmentTimeout), Maintenance (toggle + message), Support (phone, email), Social (facebook, instagram) → Save button → PUT /settings → toast success
+- [ ] **Activity Log page** (`/activity-log`): Table with columns: Date, Admin, Action, Target, Details → filters: admin dropdown, action type dropdown, date range → click row → expand details JSON (before/after values)
+- [ ] **Export Data page** (`/export`): Cards for each export type (Orders, Payouts, Riders, Customers, Restaurants) → each card has date range picker + optional filters + Download CSV button → triggers `GET /export/{type}?from&to` → browser downloads file
+- [ ] Add sidebar navigation items for all 7 new pages with icons
+- [ ] Wire `recharts` library for analytics charts (line chart, bar chart, pie chart)
+
 ### Test
 
 - New restaurant registers → admin sees pending approval
@@ -506,6 +573,13 @@ App opens → Location permission prompt
 - Admin pays rider → Payout record created, rider.earnings.pending = 0
 - Complete a COD order → order shows in "Pending COD Collections" list
 - Admin marks collected → payoutStatus = 'collection_completed'
+- **Analytics**: Select date range → overview shows correct totals → charts render → top restaurants sorted by revenue
+- **Reviews**: Submit review as customer → appears in admin Pending tab → admin approves → visible on restaurant page → admin rejects another → hidden with reason
+- **Broadcast**: Admin sends push to all customers → BroadcastNotification doc created → Notification docs created for each customer → FCM push sent → history shows delivered count
+- **Cuisine Types**: Admin adds "Mexican" → appears in public GET → admin reorders → customer app shows new order → admin deactivates → hidden from customer
+- **Settings**: Admin updates commissionRate to 12% → next order uses 12% → admin enables maintenanceMode → non-admin login returns 503 → admin disables → login works again
+- **Activity Log**: Every admin action above appears in log with correct action type, target, and admin name
+- **Export**: Admin exports orders CSV → file downloads with correct columns and filtered data → large dataset streams without timeout
 
 ---
 
@@ -532,13 +606,23 @@ App opens → Location permission prompt
 **Mobile — FCM Push Notifications (required):**
 
 - [ ] Install `expo-notifications` on customer-app/rider-app
-- [ ] On app launch: request permission + get Expo push token → POST to `/api/v1/auth/push-token`
+- [ ] On app launch: request push notification permission → if denied → show banner "Enable notifications to get order updates" (do NOT crash or block app)
+- [ ] Get Expo push token → compare with stored token → if changed (reinstall/new device) → POST to `/api/v1/auth/push-token` to update DB
 - [ ] Server saves token to `user.expoPushToken`
 - [ ] Install `firebase-admin` on server
 - [ ] Set up Firebase project + download service account key
 - [ ] `services/pushNotificationService.js`: Send FCM push with image + sound + groupKey + action data
-- [ ] All notification types: include `image`, `sound`, `groupKey`, `actionType`, `actionData` fields
-- [ ] Expo app receives FCM → handles notification tap with `actionType` (navigate to order, etc.)
+- [ ] All notification payloads include: `{ title, body, sound, image?, groupKey, data: { screen, orderId?, restaurantId? } }`
+- [ ] **Deep link on notification tap** — `addNotificationResponseReceivedListener`:
+  ```
+  data.screen === 'OrderDetail'      → navigate to Order Detail screen (orderId)
+  data.screen === 'TrackingScreen'   → navigate to Live Tracking screen (orderId)
+  data.screen === 'AvailableOrders'  → navigate to Available Orders tab (rider)
+  data.screen === 'RefundDetail'     → navigate to Order Detail with refund banner
+  data.screen === 'Notifications'    → navigate to Notifications screen
+  ```
+- [ ] **Cold start deep link** (app was completely killed when notification arrived) → on app mount call `Notifications.getLastNotificationResponseAsync()` → if exists → navigate to correct screen (same logic as above)
+- [ ] **Token refresh** — call `addPushTokenListener` → if token changes → POST new token to `/api/v1/auth/push-token` immediately
 
 ### Test
 

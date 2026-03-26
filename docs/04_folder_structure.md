@@ -1,4 +1,4 @@
-# Folder Structure — All 5 Apps
+# Folder Structure — All 6 Apps
 
 ---
 
@@ -24,7 +24,11 @@ server/
 │   │   ├── DeliveryTracking.js
 │   │   ├── Banner.js
 │   │   ├── Payout.js
-│   │   └── Counter.js              # Atomic sequence counter for orderNumber generation
+│   │   ├── Counter.js              # Atomic sequence counter for orderNumber generation
+│   │   ├── CuisineType.js          # Admin-managed cuisine type list
+│   │   ├── SystemSettings.js       # Singleton platform config (commissionRate, maintenance, etc.)
+│   │   ├── AdminActivityLog.js     # Immutable audit trail of all admin actions
+│   │   └── BroadcastNotification.js # Mass push/in-app notification blasts
 │   ├── routes/
 │   │   ├── auth.routes.js
 │   │   ├── user.routes.js
@@ -40,7 +44,14 @@ server/
 │   │   ├── payout.routes.js
 │   │   ├── banner.routes.js
 │   │   ├── search.routes.js
-│   │   └── upload.routes.js
+│   │   ├── upload.routes.js
+│   │   ├── cuisineType.routes.js    # GET (public) + CRUD (admin)
+│   │   ├── analytics.routes.js     # Admin analytics + export
+│   │   ├── review.routes.js        # Review submission (customer) + moderation (admin)
+│   │   ├── broadcast.routes.js     # Admin notification broadcast
+│   │   ├── export.routes.js        # CSV export (streams large datasets)
+│   │   ├── settings.routes.js      # System settings singleton (admin)
+│   │   └── activityLog.routes.js   # Admin activity log (read-only)
 │   ├── controllers/
 │   │   ├── auth.controller.js
 │   │   ├── user.controller.js
@@ -56,19 +67,28 @@ server/
 │   │   ├── payout.controller.js
 │   │   ├── banner.controller.js
 │   │   ├── search.controller.js
-│   │   └── upload.controller.js
+│   │   ├── upload.controller.js
+│   │   ├── cuisineType.controller.js
+│   │   ├── analytics.controller.js  # Aggregation queries for all analytics endpoints
+│   │   ├── review.controller.js     # Submit + moderation actions
+│   │   ├── broadcast.controller.js  # Resolve recipients, bulk notify, update stats
+│   │   ├── export.controller.js     # Streaming CSV responses
+│   │   ├── settings.controller.js   # Upsert singleton, log to AdminActivityLog
+│   │   └── activityLog.controller.js
 │   ├── middleware/
-│   │   ├── auth.middleware.js        # JWT verify
-│   │   ├── role.middleware.js        # Role-based access
-│   │   ├── upload.middleware.js      # Multer config
-│   │   ├── rateLimiter.middleware.js # express-rate-limit: general (100/15min) + auth (10/15min)
-│   │   ├── validate.middleware.js    # express-validator: runs checks, returns 400 with errors[] on fail
-│   │   └── error.middleware.js       # Global error handler
+│   │   ├── auth.middleware.js          # JWT verify
+│   │   ├── role.middleware.js          # Role-based access
+│   │   ├── upload.middleware.js        # Multer config
+│   │   ├── rateLimiter.middleware.js   # express-rate-limit: general (100/15min) + auth (10/15min)
+│   │   ├── validate.middleware.js      # express-validator: runs checks, returns 400 with errors[] on fail
+│   │   ├── adminActivity.middleware.js # Wraps admin controllers — logs action to AdminActivityLog (adminId, action, targetType, targetId, ip, userAgent)
+│   │   └── error.middleware.js         # Global error handler
 │   ├── services/
-│   │   ├── bkash.service.js    # bKash API calls
-│   │   ├── socket.service.js   # Socket.IO helpers
-│   │   ├── notification.service.js
-│   │   └── email.service.js    # nodemailer — sends password reset emails
+│   │   ├── bkash.service.js          # bKash API calls
+│   │   ├── socket.service.js         # Socket.IO helpers
+│   │   ├── notification.service.js   # createNotification + socket emit
+│   │   ├── pushNotification.service.js # FCM push via Expo push gateway
+│   │   └── email.service.js          # nodemailer — sends password reset emails
 │   ├── jobs/
 │   │   └── riderAssignment.job.js  # node-cron every 30s: re-broadcast unassigned orders, alert admin
 │   ├── utils/
@@ -256,13 +276,15 @@ restaurant-web/
 │   │   ├── Login.jsx
 │   │   ├── Register.jsx         # Restaurant owner registration
 │   │   └── dashboard/
-│   │       ├── Overview.jsx     # Stats overview
+│   │       ├── Overview.jsx     # Stats: total orders, revenue, ratings
 │   │       ├── Setup.jsx        # Create/edit restaurant profile
 │   │       ├── menu/
 │   │       │   ├── MenuOverview.jsx
 │   │       │   ├── Categories.jsx   # CRUD categories
 │   │       │   └── Items.jsx        # CRUD items + discounts
-│   │       ├── Orders.jsx       # Order management
+│   │       ├── Orders.jsx       # Full order management (backup — primary is restaurant-app)
+│   │       │                    # ⚠️ No push notifications on web — shows banner:
+│   │       │                    # "For real-time alerts, use the FoodBela Restaurant App"
 │   │       ├── Promotions.jsx   # Cart-threshold promotion create/edit/toggle
 │   │       ├── Vouchers.jsx     # Restaurant's own vouchers
 │   │       └── Analytics.jsx
@@ -316,7 +338,14 @@ admin-web/
 │   │       ├── Vouchers.jsx         # List + create/edit/toggle vouchers
 │   │       ├── Banners.jsx          # List + create/edit/toggle banners
 │   │       ├── Payouts.jsx          # Pending payouts + payout history
-│   │       └── Map.jsx              # Live operations map (riders + restaurants real-time)
+│   │       ├── Map.jsx              # Live operations map (riders + restaurants real-time)
+│   │       ├── Analytics.jsx        # Revenue charts, order trends, top performers (date range picker)
+│   │       ├── Reviews.jsx          # Review moderation queue — approve/reject with reason
+│   │       ├── Notifications.jsx    # Broadcast composer (target role picker, push preview) + history table
+│   │       ├── CuisineTypes.jsx     # Manage cuisine master list — add/edit/reorder/toggle active
+│   │       ├── Settings.jsx         # System settings form (commission, fees, maintenance mode toggle)
+│   │       ├── ActivityLog.jsx      # Audit log table — filter by admin, action, date range
+│   │       └── ExportData.jsx       # CSV export center — pick type, date range, download
 │   ├── components/
 │   │   ├── layout/
 │   │   │   ├── Sidebar.jsx
@@ -332,8 +361,19 @@ admin-web/
 │   │   ├── payouts/
 │   │   │   ├── PayoutTable.jsx  # Pending payouts with "Pay Now" / "Mark Collected"
 │   │   │   └── PayoutForm.jsx   # Enter amount + bKash TrxID modal
-│   │   └── map/
-│   │       └── LiveMap.jsx      # Google Maps / Leaflet with rider + restaurant pins
+│   │   ├── map/
+│   │   │   └── LiveMap.jsx          # Google Maps / Leaflet with rider + restaurant pins
+│   │   ├── analytics/
+│   │   │   ├── RevenueChart.jsx     # Line/bar chart (recharts) — orders + revenue over time
+│   │   │   └── TopPerformers.jsx    # Table component — top restaurants/riders/customers
+│   │   ├── reviews/
+│   │   │   └── ReviewCard.jsx       # Review card with approve/reject buttons + reason modal
+│   │   ├── broadcasts/
+│   │   │   └── BroadcastForm.jsx    # Composer: title, body, image, target role picker, preview
+│   │   ├── cuisineTypes/
+│   │   │   └── CuisineTypeForm.jsx  # Add/edit form: name, slug (auto-gen), icon upload, sortOrder
+│   │   └── settings/
+│   │       └── SettingsForm.jsx     # Form sections: general, fees, maintenance, support, social
 │   ├── store/
 │   │   └── authStore.js
 │   ├── services/

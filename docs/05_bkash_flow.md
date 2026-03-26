@@ -44,11 +44,17 @@ Customer sees success screen
    → Simple cancel — no refund needed
 
 2. Customer cancels order AFTER paying   (status='pending', paymentMethod='bkash', paymentStatus='paid')
-   → Server auto-triggers refund (full amount)
+   → order.refundStatus = 'processing'
+   → order.refundInitiatedAt = now
+   → order.refundProcessingUntil = now + 2 hours  (SLA deadline)
+   → Customer notified: "Refund of ৳X will be processed within 2 hours"
+   → Admin sees pending refund in dashboard → manually calls bKash refund API within SLA
 
-3. Admin manually refunds                (edge case: wrong items, food quality complaint)
-   → Admin calls POST /payments/bkash/refund with { orderId, amount, reason }
+3. Admin manually refunds                (all cases — cancellation, wrong items, quality complaint)
+   → Admin calls POST /orders/:id/refund with { amount }
    → Can be full or partial refund
+   → On success: order.refundStatus = 'completed', customer notified
+   → On bKash API failure: order.refundStatus = 'failed', admin retries from bKash merchant dashboard
 ```
 
 ---
@@ -56,7 +62,9 @@ Customer sees success screen
 ## Refund Flow
 
 ```
-POST /payments/bkash/refund called
+Admin calls POST /api/v1/orders/:id/refund { amount }
+      ↓
+Validate: order.refundStatus === 'processing' (was set when customer cancelled)
       ↓
 Validate: order.paymentMethod === 'bkash' && order.paymentStatus === 'paid'
       ↓
@@ -68,7 +76,7 @@ Call bKash Refund API (see below)
               │    order.paymentStatus = 'refunded'
               │    order.refundStatus = 'completed'
               │    order.bkashRefundTrxID = response.refundTrxID
-              │    order.refundedAmount = refundAmount
+              │    order.refundAmount = refundAmount
               │    order.refundReason = reason
               │    order.status = 'cancelled'        (if triggered by cancellation)
 bKash ────────┤    → notify customer: "Refund of ৳X processed to your bKash"
@@ -107,7 +115,7 @@ Response (success):
     originalTrxID: "...",
     refundTrxID: "...",          ← save as order.bkashRefundTrxID
     transactionStatus: "Completed",
-    amount: "...",               ← save as order.refundedAmount
+    amount: "...",               ← save as order.refundAmount
     completedTime: "..."
   }
 ```

@@ -52,10 +52,11 @@ This means: no need to be in the order room to receive status updates. The order
 | Event | Direction | Payload | Description |
 |-------|-----------|---------|-------------|
 | `new_order` | Server → Restaurant | `{ order }` | Sent to `restaurant:{restaurantId}` room |
-| `order_confirmed` | Server → Customer | `{ orderId, estimatedTime }` | Restaurant confirmed |
+| `order_confirmed` | Server → Customer | `{ orderId, estimatedDeliveryTime }` | Restaurant confirmed — shows initial ETA |
+| `order_eta_updated` | Server → Customer | `{ orderId, estimatedDeliveryTime, previousEstimatedDeliveryTime }` | Restaurant updated ETA — customer notified via socket + push notification |
 | `order_preparing` | Server → Customer | `{ orderId }` | Restaurant started preparing |
 | `order_ready` | Server → Customer + Admin | `{ orderId }` | Food ready, broadcast to nearby riders |
-| `order_accepted_by_rider` | Server → Customer + Restaurant | `{ orderId, rider: { name, phone, vehicleType } }` | Rider accepted → status: assigned |
+| `order_accepted_by_rider` | Server → Customer + Restaurant + `riders_online` room | `{ orderId, rider: { name, phone, vehicleType } }` | Rider accepted → status: assigned. Broadcast to `riders_online` so other riders auto-remove stale order from available list |
 | `order_picked_up` | Server → Customer + Restaurant | `{ orderId }` | Rider picked up → live location begins |
 | `order_delivered` | Server → Customer + Restaurant | `{ orderId }` | Order delivered |
 | `order_cancelled` | Server → Customer + Restaurant + Rider | `{ orderId, cancelledBy, reason }` | Order cancelled |
@@ -71,6 +72,13 @@ This means: no need to be in the order room to receive status updates. The order
 | `refund_failed` | Server → Customer | `{ orderId, amount, reason }` | Refund processing failed. Notification: "Refund failed. Our team will contact you shortly" |
 | `pending_refunds_updated` | Server → Admin | `{ pendingCount, overdueCount }` | Real-time dashboard update when new refunds added or refund SLA exceeded |
 
+### Registration & Approval Events
+| Event | Direction | Payload | Description |
+|-------|-----------|---------|-------------|
+| `new_registration_alert` | Server → Admin | `{ type: 'rider'\|'restaurant', userId, name, registeredAt }` | New rider or restaurant owner registered — admin needs to review and approve |
+| `rider_approved` | Server → Rider | `{ isApproved, message }` | Admin approved/rejected rider. If approved: "আপনার account approve হয়েছে! এখন delivery শুরু করুন" |
+| `restaurant_approved` | Server → Restaurant Owner | `{ isApproved, message }` | Admin approved/rejected restaurant. If approved: "আপনার restaurant approve হয়েছে! এখন orders নিন" |
+
 ---
 
 ## Rider Availability Events
@@ -81,6 +89,15 @@ This means: no need to be in the order room to receive status updates. The order
 | `rider_location_idle` | Rider → Server | `{ lat, lng }` | Rider online but no active delivery — emitted every 30s to keep admin map fresh |
 | `rider_offline` | Rider → Server | — | Rider goes offline → **blocked if rider has `assigned` orders in queue**. Server checks and returns error if queue not empty |
 | `new_order_available` | Server → Rider | `{ order, restaurant, distance }` | Emitted to each nearby rider's `user:{riderId}` room individually (NOT a room broadcast) |
+
+---
+
+## Admin System Events
+
+| Event | Direction | Payload | Description |
+|-------|-----------|---------|-------------|
+| `maintenance_mode` | Server → All connected | `{ enabled: true/false, message }` | Admin toggled maintenance mode in SystemSettings. All apps listen — if `enabled=true`, show maintenance screen overlay. Emitted to all connected sockets via `io.emit()` |
+| `broadcast_sent` | Server → Admin | `{ broadcastId, recipientCount, status }` | Confirmation to admin after broadcast notification is queued/completed |
 
 ---
 
@@ -203,11 +220,14 @@ if (riderSocket) riderSocket.join(`order:${orderId}`)
 
 ### Rider Assignment Notification
 ```js
-// When rider accepts order:
+// When rider accepts order — emit to 3 targets:
+// 1. order room → customer + restaurant get rider info
 io.to(`order:${orderId}`).emit('order_accepted_by_rider', {
   orderId,
   rider: { name, phone, vehicleType, vehicleNumber }
 })
+// 2. riders_online room → all online riders auto-remove stale order from their available list
+io.to('riders_online').emit('order_accepted_by_rider', { orderId })
 ```
 
 ### No Rider Timeout — DB-Based Cron (Kubernetes-Safe)
@@ -230,10 +250,13 @@ cron.schedule('*/30 * * * * *', async () => {
   }).populate('restaurantId')
 
   for (const order of overdueOrders) {
-    // Re-broadcast to all online riders
-    io.to('riders_online').emit('new_order_available', {
-      order, restaurant: order.restaurantId, distance: null
-    })
+    // Re-broadcast to all online riders individually (NOT room broadcast)
+    const onlineRiders = await User.find({ role: 'rider', isOnline: true, isApproved: true }, '_id')
+    for (const rider of onlineRiders) {
+      io.to(`user:${rider._id}`).emit('new_order_available', {
+        order, restaurant: order.restaurantId, distance: null
+      })
+    }
     // Alert admin
     io.to('admin').emit('unassigned_order_alert', {
       orderId: order._id,

@@ -36,7 +36,12 @@ Firebase Project
 # Go to Project Settings → Download google-services.json
 ```
 
-**Save:** `customer-app/google-services.json`
+**Save to all 3 mobile apps:**
+- `customer-app/google-services.json`
+- `rider-app/google-services.json`
+- `restaurant-app/google-services.json`
+
+> Same Firebase project, same file — all 3 apps share one Firebase project.
 
 ### 2. Update customer-app/app.json
 
@@ -257,6 +262,264 @@ server/
 - [ ] Token stored in database (user.expoPushToken)
 - [ ] Send test notification from Expo dashboard
 - [ ] Notification appears on Android device
+
+---
+
+## Notification Payload — Navigation Data
+
+Every notification sent from server **must include `data` with screen + id** so tap navigates correctly:
+
+```js
+// server/services/pushNotificationService.js
+const notificationPayloads = {
+  // Rider notifications
+  new_order_available: (orderId) => ({
+    title: '🛵 নতুন Order Available!',
+    body: 'একটি নতুন delivery order আছে। দ্রুত Accept করুন!',
+    sound: 'order_alert',
+    data: { screen: 'AvailableOrders', orderId }
+  }),
+  order_cancelled_rider: (orderId, orderNumber) => ({
+    title: '❌ Order Cancelled',
+    body: `Order #${orderNumber} cancel হয়েছে`,
+    sound: 'default',
+    data: { screen: 'OrderDetail', orderId }
+  }),
+
+  // Customer notifications
+  order_confirmed: (orderId, restaurantName) => ({
+    title: '✅ Order Confirmed!',
+    body: `${restaurantName} আপনার order confirm করেছে`,
+    sound: 'default',
+    data: { screen: 'OrderDetail', orderId }
+  }),
+  order_eta_updated: (orderId, newTime) => ({
+    title: '⏱ Order Update',
+    body: `আপনার order এর নতুন সময়: ${newTime} মিনিট`,
+    sound: 'default',
+    data: { screen: 'OrderDetail', orderId }
+  }),
+  rider_assigned: (orderId, riderName) => ({
+    title: '🛵 Rider Assigned!',
+    body: `${riderName} আপনার order নিতে আসছে`,
+    sound: 'default',
+    data: { screen: 'OrderDetail', orderId }
+  }),
+  rider_nearby: (orderId) => ({
+    title: '📍 Rider কাছে আসছে!',
+    body: 'আপনার rider ৫০০ মিটারের মধ্যে আছে',
+    sound: 'delivery_nearby',
+    data: { screen: 'TrackingScreen', orderId }
+  }),
+  order_delivered: (orderId) => ({
+    title: '🎉 Order Delivered!',
+    body: 'আপনার order পৌঁছে গেছে। Rate করুন!',
+    sound: 'order_delivered',
+    data: { screen: 'OrderDetail', orderId }
+  }),
+  refund_completed: (orderId, amount) => ({
+    title: '💚 Refund Completed!',
+    body: `৳${amount} আপনার bKash এ ফেরত গেছে`,
+    sound: 'default',
+    data: { screen: 'OrderDetail', orderId }
+  }),
+
+  // Approval notifications
+  rider_approved: () => ({
+    title: '✅ Account Approved!',
+    body: 'আপনার rider account approve হয়েছে। এখনই delivery শুরু করুন!',
+    sound: 'default',
+    data: { screen: 'Dashboard' }
+  }),
+  rider_rejected: (reason) => ({
+    title: '❌ Account Rejected',
+    body: `আপনার application reject হয়েছে। কারণ: ${reason}`,
+    sound: 'default',
+    data: { screen: 'Register' }
+  }),
+  restaurant_approved: () => ({
+    title: '✅ Restaurant Approved!',
+    body: 'আপনার restaurant approve হয়েছে। এখনই orders নেওয়া শুরু করুন!',
+    sound: 'default',
+    data: { screen: 'Dashboard' }
+  }),
+  restaurant_rejected: (reason) => ({
+    title: '❌ Restaurant Rejected',
+    body: `আপনার restaurant application reject হয়েছে। কারণ: ${reason}`,
+    sound: 'default',
+    data: { screen: 'PendingApproval' }  // restaurant-app shows rejection banner on PendingApproval screen; restaurant-web redirects to Setup page
+  }),
+
+  // Restaurant notifications
+  new_order: (orderId, orderNumber) => ({
+    title: '🔔 নতুন Order!',
+    body: `Order #${orderNumber} এসেছে — এখনই Confirm করুন`,
+    sound: 'order_alert',
+    data: { screen: 'OrderDetail', orderId }
+  }),
+  order_cancelled_restaurant: (orderId, orderNumber) => ({
+    title: '❌ Order Cancelled',
+    body: `Order #${orderNumber} customer cancel করেছে`,
+    sound: 'default',
+    data: { screen: 'OrderDetail', orderId }
+  }),
+}
+```
+
+---
+
+## Deep Link Handling (Notification Tap)
+
+Add to **`App.jsx`** (both customer-app and rider-app):
+
+```js
+import * as Notifications from 'expo-notifications'
+import { useEffect, useRef } from 'react'
+import { useNavigation } from '@react-navigation/native'
+
+function useNotificationNavigation() {
+  const navigation = useNavigation()
+  const notificationListener = useRef()
+  const responseListener = useRef()
+
+  const handleNotificationData = (data) => {
+    if (!data?.screen) return
+    switch (data.screen) {
+      case 'OrderDetail':
+        navigation.navigate('OrderDetail', { orderId: data.orderId })
+        break
+      case 'TrackingScreen':
+        navigation.navigate('TrackingScreen', { orderId: data.orderId })
+        break
+      case 'AvailableOrders':
+        navigation.navigate('AvailableOrders')
+        break
+      case 'RefundDetail':
+        navigation.navigate('OrderDetail', { orderId: data.orderId, showRefundBanner: true })
+        break
+      case 'Notifications':
+        navigation.navigate('Notifications')
+        break
+      case 'Dashboard':
+        navigation.navigate('Dashboard')
+        break
+      case 'PendingApproval':
+        navigation.navigate('PendingApproval')  // rider-app/restaurant-app: shows approval status screen
+        break
+    }
+  }
+
+  useEffect(() => {
+    // 1. App OPEN (foreground) — notification arrives
+    notificationListener.current = Notifications.addNotificationReceivedListener(notification => {
+      // In-app notification already handled by socket — no navigation needed here
+    })
+
+    // 2. App BACKGROUND — user taps notification
+    responseListener.current = Notifications.addNotificationResponseReceivedListener(response => {
+      const data = response.notification.request.content.data
+      handleNotificationData(data)
+    })
+
+    // 3. App KILLED (cold start) — user tapped notification to open app
+    Notifications.getLastNotificationResponseAsync().then(response => {
+      if (response?.notification?.request?.content?.data) {
+        // Small delay to let navigation stack mount
+        setTimeout(() => {
+          handleNotificationData(response.notification.request.content.data)
+        }, 500)
+      }
+    })
+
+    return () => {
+      Notifications.removeNotificationSubscription(notificationListener.current)
+      Notifications.removeNotificationSubscription(responseListener.current)
+    }
+  }, [])
+}
+```
+
+---
+
+## Token Refresh Handling
+
+Expo push tokens can change on app reinstall or device reset. Always sync:
+
+```js
+// In notificationService.js — called on every app launch
+import * as Notifications from 'expo-notifications'
+import AsyncStorage from '@react-native-async-storage/async-storage'
+import api from './api'
+
+export const syncPushToken = async () => {
+  try {
+    const { status } = await Notifications.getPermissionsAsync()
+    if (status !== 'granted') return  // Permission denied — skip silently
+
+    const { data: newToken } = await Notifications.getExpoPushTokenAsync({
+      projectId: Constants.expoConfig.extra.eas.projectId
+    })
+
+    // Only update if token changed (saves an API call on every launch)
+    const storedToken = await AsyncStorage.getItem('expoPushToken')
+    if (newToken !== storedToken) {
+      await api.post('/auth/push-token', { token: newToken })
+      await AsyncStorage.setItem('expoPushToken', newToken)
+    }
+
+    // Listen for future token changes (rare but possible)
+    Notifications.addPushTokenListener(async ({ data: refreshedToken }) => {
+      await api.post('/auth/push-token', { token: refreshedToken })
+      await AsyncStorage.setItem('expoPushToken', refreshedToken)
+    })
+
+  } catch (err) {
+    console.warn('Push token sync failed:', err.message)
+    // Non-fatal — app works fine without push token
+  }
+}
+```
+
+---
+
+## Permission Denied — Graceful Handling
+
+```js
+import { Linking } from 'react-native'
+import * as Notifications from 'expo-notifications'
+
+export const requestNotificationPermission = async () => {
+  const { status: existingStatus } = await Notifications.getPermissionsAsync()
+  if (existingStatus === 'granted') return true
+
+  const { status } = await Notifications.requestPermissionsAsync()
+  if (status !== 'granted') {
+    // DO NOT crash or block the app
+    // Return false → App.jsx shows a soft dismissible banner
+    return false
+  }
+  return true
+}
+
+// In the soft banner component:
+// "🔔 Enable notifications to get order updates"  [Enable] [Dismiss]
+// [Enable] button → opens Android notification settings for this app
+const openNotificationSettings = () => {
+  Linking.openSettings()  // Opens Android Settings → App → Notifications
+}
+```
+
+> Applies to all 3 mobile apps: customer-app, rider-app, restaurant-app
+
+---
+
+## Testing Checklist (Updated)
+
+- [ ] Stale 409 handling: accept order already taken → toast + navigate back ✓
+- [ ] Deep link (background): tap notification → correct screen opens ✓
+- [ ] Deep link (cold start): kill app → tap notification → correct screen after launch ✓
+- [ ] Token refresh: reinstall app → new token synced to server ✓
+- [ ] Permission denied: app works normally, shows soft banner only ✓
 
 ---
 

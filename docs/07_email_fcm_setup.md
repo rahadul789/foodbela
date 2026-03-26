@@ -170,13 +170,14 @@ module.exports = { sendPasswordResetEmail, sendOrderConfirmationEmail }
 
 ### Installation
 ```bash
-npm install axios
-# axios is already installed for HTTP requests
+# expo-server-sdk is already in the server install command (Milestone 1)
+# It wraps the exp.host endpoint with chunking, error handling, and receipt tracking
+# Alternative: use raw axios calls to https://exp.host/--/api/v2/push/send (shown below for reference)
 ```
 
 ### Backend Setup (server/services/pushNotificationService.js)
 
-**Send notifications to Expo Push Service endpoint:**
+**Send notifications to Expo Push Service endpoint (using raw axios — can also use `expo-server-sdk` for built-in chunking/receipts):**
 
 ```js
 const axios = require('axios')
@@ -359,30 +360,32 @@ module.exports = {
 5. Android device receives notification via FCM
 6. Client handles tap with `actionType`
 
-### API Endpoints for Push Notifications
+### API Endpoints for Notifications
 
-| Method | Endpoint | Body | Auth | Description |
-|--------|----------|------|------|-------------|
-| POST | `/api/v1/notifications` | `{ userId, title, body, type, image, sound, groupKey, actionType }` | admin | Send notification to user |
-| POST | `/api/v1/notifications/group` | `{ userIds[], ...notificationData }` | admin | Send to multiple users |
-| POST | `/api/v1/notifications/broadcast` | `{ role, ...notificationData }` | admin | Send to all riders/customers |
-| GET | `/api/v1/notifications/my` | `?page&limit` | any | Get own notifications |
-| PUT | `/api/v1/notifications/:id/read` | — | any | Mark as read |
-| POST | `/api/v1/notifications/retry-failed` | — | admin | Retry failed push sends |
+> See `docs/02_api_endpoints.md` for the authoritative endpoint list. Key routes:
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| GET | `/api/v1/notifications` | Any auth | Get own notifications (paginated) |
+| PUT | `/api/v1/notifications/:id/read` | Any auth | Mark as read |
+| PUT | `/api/v1/notifications/read-all` | Any auth | Mark all as read |
+| GET | `/api/v1/notifications/unread-count` | Any auth | Get unread count |
+| POST | `/api/v1/broadcasts` | admin | Mass push + in-app notification (see Broadcast Routes in API doc) |
+
+> Push notifications to individual users are sent **server-side** via `pushNotificationService.js` (called from controllers, not via REST endpoint). Mass broadcasts use `POST /broadcasts`.
 
 ### Notification Sound Files
 
-Store custom sound files in `server/assets/sounds/`:
+Custom sound files are bundled in each **mobile app** (not server). Sound files go in the app's `assets/sounds/` directory and are referenced in `app.json` expo-notifications plugin config:
 ```
-server/
-├── assets/
-│   └── sounds/
-│       ├── order_alert.wav        (for new orders)
-│       ├── delivery_nearby.wav     (for rider nearby alert)
-│       ├── order_delivered.wav     (for order delivered)
+customer-app/assets/sounds/
+├── order_alert.wav        (for new orders — also used by rider-app, restaurant-app)
+├── delivery_nearby.wav     (for rider nearby alert)
+└── order_delivered.wav     (for order delivered)
 ```
 
-When sending notification, reference by filename: `sound: 'order_alert.wav'`
+When sending notification from server, reference by filename: `sound: 'order_alert'` (without extension).
+See `docs/11_expo_fcm_implementation_guide.md` for full `app.json` config with sounds.
 
 ---
 
@@ -514,8 +517,6 @@ export const useNotifications = () => {
     }
   }, [])
 }
-
-export default useNotifications
 
 export default useNotifications
 ```
@@ -657,9 +658,6 @@ grep "userId: 12345" server/logs/combined.log
 # Email Service
 EMAIL_USER=your-email@gmail.com
 EMAIL_PASSWORD=your-app-specific-password
-
-# Firebase
-FIREBASE_DB_URL=https://your-project.firebaseio.com
 
 # Logging
 LOG_LEVEL=info

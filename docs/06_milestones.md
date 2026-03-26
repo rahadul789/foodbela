@@ -39,7 +39,7 @@ Test each milestone before starting the next one.
   EMAIL_HOST=smtp.gmail.com
   EMAIL_PORT=587
   EMAIL_USER=your@gmail.com
-  EMAIL_PASS=your_app_password
+  EMAIL_PASSWORD=your_app_password
   EMAIL_FROM=FoodBela <noreply@foodbela.com>
   CLIENT_URL=http://localhost:5173
   ```
@@ -58,8 +58,9 @@ Test each milestone before starting the next one.
   - **Kubernetes-safe**: DB-based check, works across all pods (replaces old in-memory `pendingOrderTimeouts` Map)
 - [ ] Proper logging: Winston (structured logs to file) + Morgan (HTTP request logs)
   - See `docs/07_email_fcm_setup.md` Part 4 for Winston configuration + usage
-- [ ] Firebase Admin SDK setup for push notifications (FCM)
-  - See `docs/07_email_fcm_setup.md` Part 2 for Firebase setup + service account key
+- [ ] Firebase project setup — create project, download `google-services.json` for mobile apps (FCM credentials embedded at EAS build time, NOT used on server)
+  - See `docs/07_email_fcm_setup.md` Part 0 for Firebase project setup
+  - See `docs/11_expo_fcm_implementation_guide.md` for full Expo + FCM flow
 - [ ] Nodemailer setup for email service (password reset, order confirmations)
   - See `docs/07_email_fcm_setup.md` Part 1 for Nodemailer configuration
 - [ ] All new files across all apps → write in `.js` or `.jsx` only (existing `.ts`/`.tsx` files stay unchanged)
@@ -69,7 +70,7 @@ Test each milestone before starting the next one.
 
 ```bash
 npm init -y
-npm install express mongoose socket.io jsonwebtoken bcryptjs dotenv cors multer cloudinary multer-storage-cloudinary axios winston morgan express-validator express-rate-limit nodemailer firebase-admin node-cron
+npm install express mongoose socket.io jsonwebtoken bcryptjs dotenv cors helmet multer cloudinary multer-storage-cloudinary axios winston morgan express-validator express-rate-limit nodemailer node-cron expo-server-sdk fast-csv
 npm install -D nodemon
 ```
 
@@ -105,7 +106,7 @@ npm install -D nodemon
 - [ ] `GET /api/search?q=...` — searches both restaurants (by name) AND menu items (by dish name), returns both lists
 - [ ] Promotion CRUD endpoints (`POST`, `GET`, `PUT`, `DELETE`, `toggle`) — restaurant_owner creates cart-threshold promotions
 - [ ] `GET /api/promotions/:restaurantId` — returns active promotion for a restaurant (public)
-- [ ] `POST /orders` backend validation: reject if `subtotal < restaurant.minimumOrder` (return 400) — frontend check is UX only, backend is the real gate
+- [ ] `POST /orders` backend validation: reject if `subtotal < restaurant.minimumOrder` OR `subtotal < SystemSettings.minOrderAmount` (return 400 with whichever is higher) — frontend check is UX only, backend is the real gate
 
 ### Test
 
@@ -609,9 +610,7 @@ App opens → Location permission prompt
 - [ ] On app launch: request push notification permission → if denied → show banner "Enable notifications to get order updates" (do NOT crash or block app)
 - [ ] Get Expo push token → compare with stored token → if changed (reinstall/new device) → POST to `/api/v1/auth/push-token` to update DB
 - [ ] Server saves token to `user.expoPushToken`
-- [ ] Install `firebase-admin` on server
-- [ ] Set up Firebase project + download service account key
-- [ ] `services/pushNotificationService.js`: Send FCM push with image + sound + groupKey + action data
+- [ ] `services/pushNotificationService.js`: Send push via Expo push service (`expo-server-sdk` → `exp.host/--/api/v2/push/send`) with image + sound + groupKey + action data. NOT firebase-admin — Expo handles FCM routing.
 - [ ] All notification payloads include: `{ title, body, sound, image?, groupKey, data: { screen, orderId?, restaurantId? } }`
 - [ ] **Deep link on notification tap** — `addNotificationResponseReceivedListener`:
   ```
@@ -672,7 +671,7 @@ App opens → Location permission prompt
 - [ ] Rate limiting with `express-rate-limit`
 - [ ] CORS configuration for production URLs
 - [ ] Helmet.js for security headers
-- [ ] Order number auto-generation (FB-2024-00001 format)
+- [ ] Order number auto-generation (ORD-YYYYMMDD-NNNNNN format via atomic Counter model)
 - [ ] Handle socket disconnections gracefully
 - [ ] Loading states and error states in all apps
 - [ ] Empty states (no restaurants, no orders, etc.)
@@ -693,12 +692,14 @@ App opens → Location permission prompt
 **Setup & Core:**
 
 - [ ] Create `modules/bela/` folder structure inside `customer-app/`
-- [ ] Install `lottie-react-native` in customer-app
+- [ ] Install `react-native-svg`, `react-native-reanimated`, `expo-sensors`, `expo-haptics` in customer-app
 - [ ] Create `BelaProvider` context — manages mood, message queue, visibility, minimized state
 - [ ] Create `useBela` hook — returns `triggerMood()`, `showMessage()`, graceful no-op if outside provider
 - [ ] Wrap `app/_layout.jsx` with `BelaProvider` (single integration line)
 - [ ] Create `BelaOverlay` — floating absolute-positioned container (bottom-right), renders character + bubble
-- [ ] Create `BelaCharacter` — Lottie animation renderer, swaps animation file based on current mood
+- [ ] Create `BelaCharacter` — SVG cat drawn in code (`react-native-svg`), each body part a separate animated element. Mood changes = SVG prop changes (eye shape, mouth curve, ear rotation, tail wag) with smooth Reanimated transitions
+- [ ] Create SVG data files: `svg/catParts.js` (path data for head, ears, body, tail, paws, whiskers), `svg/accessories.js` (crown, party hat, hearts, zzz, tears, steam, confetti — rendered conditionally per mood), `svg/colors.js` (color palette)
+- [ ] Implement continuous idle animations in Reanimated (breathing scaleY loop, eye blinking every 3-5s, gentle tail sway, ear twitch, floating translateY)
 - [ ] Create `BelaBubble` — speech bubble component with auto-dismiss (4s default), queue system, cooldown (same message within 5min blocked), frequency cap (max 1 auto-bubble per 30s, taps bypass)
 
 **Mood Engine (Passive — works without any screen using useBela):**
@@ -724,7 +725,7 @@ App opens → Location permission prompt
 - [ ] `data/dialogues.js` — all dialogue strings organized by screen + mood + context (all in Bangla)
 - [ ] `data/moods.js` — 13 mood definitions with priority levels and animation mappings
 - [ ] `data/achievements.js` — achievement definitions (1st order, 5th, 10th, 25th, 50th, first 5-star, first referral, first voucher, 3-day streak)
-- [ ] `data/animations.js` — maps mood → Lottie file path
+- [ ] `data/animations.js` — maps mood → Reanimated animation configs (shared value targets, spring/timing params, durations)
 
 **Onboarding (First-Time User):**
 
@@ -751,24 +752,18 @@ App opens → Location permission prompt
 - [ ] Store in AsyncStorage under `belaSettings` key
 - [ ] Respect settings in BelaProvider — if disabled, render nothing
 
-**Animation Assets:**
-
-- [ ] Create/source 20 Lottie animation JSON files (happy, excited, hungry, sleepy, curious, celebrating, sad, angry, proud, love, thinking, waving, pointing, tap-reaction, purring, sleeping, dizzy, slide-out, slide-in + 4 onboarding)
-- [ ] Place in `modules/bela/assets/`
-- [ ] Total target: ~1.5MB for all animations
-- [ ] Lazy load — only one animation active at a time
-
 **Performance:**
 
 - [ ] `BelaContext` split so mood changes only re-render overlay, not screen children
-- [ ] Lottie: one animation at a time (swap on mood change, unmount previous)
+- [ ] Reanimated `useAnimatedProps` for SVG path changes — runs on UI thread, no JS bridge
 - [ ] Absolute positioning — zero layout impact on scroll/content
 - [ ] AsyncStorage reads on mount only, cached in state
 
 ### Packages to Install (customer-app)
 
 ```bash
-npx expo install lottie-react-native
+npx expo install react-native-svg
+npx expo install react-native-reanimated
 npx expo install expo-sensors    # For shake detection easter egg
 npx expo install expo-haptics    # For purr vibration on long press
 ```
@@ -812,12 +807,16 @@ npx expo install expo-haptics    # For purr vibration on long press
   "cors": "latest",
   "multer": "latest",
   "cloudinary": "latest",
+  "multer-storage-cloudinary": "latest",
   "axios": "latest",
   "express-validator": "latest",
   "express-rate-limit": "latest",
   "helmet": "latest",
   "winston": "latest",
   "morgan": "latest",
+  "nodemailer": "latest",
+  "node-cron": "latest",
+  "fast-csv": "latest",
   "expo-server-sdk": "latest"
 }
 ```
@@ -844,7 +843,8 @@ npx expo install expo-haptics    # For purr vibration on long press
   "expo-location": "latest",
   "react-native-webview": "latest",
   "expo-notifications": "latest",
-  "lottie-react-native": "latest",
+  "react-native-svg": "latest",
+  "react-native-reanimated": "latest",
   "expo-sensors": "latest",
   "expo-haptics": "latest"
 }
@@ -853,8 +853,9 @@ npx expo install expo-haptics    # For purr vibration on long press
 ### customer-app Only (Bela Mascot)
 
 ```
-lottie-react-native, expo-sensors, expo-haptics are only needed in customer-app.
-rider-app and restaurant-app do NOT need these packages.
+expo-sensors, expo-haptics are only needed in customer-app (Bela cat mascot).
+react-native-svg and react-native-reanimated may already be installed by Expo.
+rider-app and restaurant-app do NOT need expo-sensors/expo-haptics.
 ```
 
 ---

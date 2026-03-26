@@ -179,7 +179,7 @@ customer-app/
 │       ├── index.js                   # Module exports (BelaProvider, useBela)
 │       ├── components/
 │       │   ├── BelaOverlay.jsx        # Floating overlay container (renders character + bubble)
-│       │   ├── BelaCharacter.jsx      # Lottie animation renderer (swaps by mood)
+│       │   ├── BelaCharacter.jsx      # SVG cat drawn in code (react-native-svg + reanimated)
 │       │   ├── BelaBubble.jsx         # Speech bubble with auto-dismiss + queue
 │       │   ├── BelaMinimized.jsx      # Small paw icon when dismissed
 │       │   └── BelaOnboarding.jsx     # First-time 4-step walkthrough
@@ -195,35 +195,14 @@ customer-app/
 │       │   ├── dialogues.js           # All Bangla dialogues by screen + mood + context
 │       │   ├── moods.js               # 13 mood definitions + priorities + transitions
 │       │   ├── achievements.js        # Achievement thresholds + celebration messages
-│       │   └── animations.js          # Mood → Lottie file mapping
-│       ├── utils/
-│       │   ├── belaStorage.js         # AsyncStorage helpers (onboarding, achievements, settings)
-│       │   └── belaScheduler.js       # Message cooldown, frequency cap, queue logic
-│       └── assets/                    # ~20 Lottie JSON files (~1.5MB total)
-│           ├── happy.json
-│           ├── excited.json
-│           ├── hungry.json
-│           ├── sleepy.json
-│           ├── curious.json
-│           ├── celebrating.json
-│           ├── sad.json
-│           ├── angry.json
-│           ├── proud.json
-│           ├── love.json
-│           ├── thinking.json
-│           ├── waving.json
-│           ├── pointing.json
-│           ├── tap-reaction.json
-│           ├── purring.json
-│           ├── sleeping.json
-│           ├── dizzy.json
-│           ├── slide-out.json
-│           ├── slide-in.json
-│           └── onboarding/
-│               ├── welcome.json
-│               ├── guide-scroll.json
-│               ├── guide-search.json
-│               └── guide-order.json
+│       │   └── animations.js          # Reanimated animation configs per mood (spring, timing, targets)
+│       ├── svg/
+│       │   ├── catParts.js            # SVG path data for body parts (head, ears, body, tail, paws)
+│       │   ├── accessories.js         # SVG components: crown, party hat, hearts, zzz, tears, steam, confetti
+│       │   └── colors.js             # Cat color palette constants
+│       └── utils/
+│           ├── belaStorage.js         # AsyncStorage helpers (onboarding, achievements, settings)
+│           └── belaScheduler.js       # Message cooldown, frequency cap, queue logic
 ├── constants/
 │   └── colors.js
 ├── babel.config.js

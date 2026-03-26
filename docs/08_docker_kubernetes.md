@@ -47,9 +47,9 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
   CMD node -e "require('http').get('http://localhost:5000/health', (r) => {if (r.statusCode !== 200) throw new Error(r.statusCode)})"
 ```
 
-### Dockerfile for Customer Web (React)
+### Dockerfile for Restaurant Web (React)
 
-**customer-web/Dockerfile:**
+**restaurant-web/Dockerfile:**
 
 ```dockerfile
 # Build stage
@@ -128,6 +128,20 @@ services:
     networks:
       - foodbela-network
 
+  restaurant-web:
+    build:
+      context: ./restaurant-web
+      dockerfile: Dockerfile
+    container_name: foodbela-restaurant
+    ports:
+      - '3002:3000'
+    environment:
+      VITE_API_URL: http://localhost:5000
+    depends_on:
+      - server
+    networks:
+      - foodbela-network
+
 volumes:
   mongo-data:
 
@@ -191,25 +205,6 @@ stringData:
   MONGO_URI: mongodb+srv://username:password@cluster.mongodb.net/foodbela?retryWrites=true&w=majority
 ```
 
-**k8s/firebase-secret.yaml:**
-
-```yaml
-apiVersion: v1
-kind: Secret
-metadata:
-  name: firebase-secret
-  namespace: foodbela
-type: Opaque
-stringData:
-  FIREBASE_KEY: |
-    {
-      "type": "service_account",
-      "project_id": "...",
-      "private_key_id": "...",
-      ...
-    }
-```
-
 **k8s/configmap.yaml:**
 
 ```yaml
@@ -268,11 +263,6 @@ spec:
             secretKeyRef:
               name: app-secret
               key: JWT_SECRET
-        - name: FIREBASE_KEY
-          valueFrom:
-            secretKeyRef:
-              name: firebase-secret
-              key: FIREBASE_KEY
         livenessProbe:
           httpGet:
             path: /health
@@ -387,6 +377,10 @@ metadata:
   namespace: foodbela
   annotations:
     nginx.ingress.kubernetes.io/rewrite-target: /
+    # Socket.IO sticky sessions — required for WebSocket with 2+ pods
+    nginx.ingress.kubernetes.io/affinity: "cookie"
+    nginx.ingress.kubernetes.io/session-cookie-name: "io-session"
+    nginx.ingress.kubernetes.io/session-cookie-expires: "172800"
 spec:
   rules:
   - host: api.foodbela.local
@@ -419,7 +413,6 @@ kubectl apply -f k8s/namespace.yaml
 
 # Create secrets
 kubectl apply -f k8s/mongodb-secret.yaml
-kubectl apply -f k8s/firebase-secret.yaml
 
 # Create configmap
 kubectl apply -f k8s/configmap.yaml

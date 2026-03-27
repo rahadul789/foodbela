@@ -3,6 +3,7 @@
 ## Overview
 
 FoodBela is a food delivery platform for Bangladesh, similar to FoodPanda.
+**Tagline:** "Eat & Smile"
 Architecture: **Monolithic** | Language: **JavaScript only** | Payment: **bKash**
 
 ---

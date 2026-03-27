@@ -8,7 +8,15 @@ Unified design system for all 6 FoodBela apps. Ensures visual consistency across
 
 **Brand Color:** `#ffc107` (Amber/Gold — warm, appetizing, food-centric)
 **Brand Name:** FoodBela (ফুডবেলা)
+**Tagline:** "Eat & Smile"
 **Mascot:** Bela the Bengal Cat (customer-app only)
+
+### Tagline Usage
+- **Login/Register pages** — below the logo, `text-muted` color, `text-sm`
+- **Email footers** — "FoodBela — Eat & Smile"
+- **Splash/loading screens** — centered under brand name
+- **About/footer sections** — web dashboard footers
+- Do NOT use as a heading or hero text — keep it subtle and secondary
 
 ---
 

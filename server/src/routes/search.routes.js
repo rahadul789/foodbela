@@ -1,6 +1,8 @@
-const express = require('express');
-const router = express.Router();
+const express = require('express')
+const router = express.Router()
 
-// TODO: Implement search routes in Milestone 4
+const { search } = require('../controllers/search.controller')
 
-module.exports = router;
+router.get('/', search)
+
+module.exports = router

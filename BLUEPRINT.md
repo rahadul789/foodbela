@@ -70,6 +70,7 @@ Architecture: **Monolithic** | Language: **JavaScript only** | Payment: **bKash*
 9. [Staging & CI/CD](./docs/09_staging_cicd.md)
 10. [Expo FCM Implementation Guide](./docs/11_expo_fcm_implementation_guide.md)
 11. [Bela Cat Mascot](./docs/12_bela_cat_mascot.md)
+12. [Design System](./docs/13_design_system.md)
 
 > Note: File numbering skips `10_` — docs 10-11 map to files `11_` and `12_`.
 

@@ -1,6 +1,10 @@
-const express = require('express');
-const router = express.Router();
+const express = require('express')
+const router = express.Router()
 
-// TODO: Implement upload routes in Milestone 2
+const auth = require('../middleware/auth.middleware')
+const upload = require('../middleware/upload.middleware')
+const { uploadImage } = require('../controllers/upload.controller')
 
-module.exports = router;
+router.post('/image', auth, upload.single('image'), uploadImage)
+
+module.exports = router
